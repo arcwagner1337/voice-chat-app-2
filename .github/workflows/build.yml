@@ -87,14 +87,8 @@ jobs:
           # 1. Глобальный конфиг Gradle (самый приоритетный способ)
           mkdir -p ~/.gradle
           echo "kotlin.plugin.suppressKotlinVersionCompatibilityCheck=true" >> ~/.gradle/gradle.properties
-
-          # 2. Локальный конфиг (на случай, если EAS подхватит его при пребилде)
-          mkdir -p android
-          echo "kotlin.plugin.suppressKotlinVersionCompatibilityCheck=true" >> android/gradle.properties
-          echo "android.useAndroidX=true" >> android/gradle.properties
-          echo "android.enableJetifier=true" >> android/gradle.properties
-
-          # 3. Запуск сборки
+          
+          # 2. Запуск сборки
           eas build --platform ${{ github.event.inputs.platform }} --local --profile ${{ github.event.inputs.profile }} --non-interactive --clear-cache
         env:
           NODE_ENV: ${{ github.event.inputs.profile }}
