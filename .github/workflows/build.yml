@@ -83,6 +83,7 @@ jobs:
         run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > google-services.json
 
       - name: 🚀 Build with EAS
+
         run: |
           # 1. Глобальный конфиг Gradle
           mkdir -p ~/.gradle
@@ -92,11 +93,13 @@ jobs:
           echo "android.useFullClasspathForDexingTransform=true" >> ~/.gradle/gradle.properties
 
           # 2. Обязательно убедись, что нет ручного создания папки android/
+          npx expo prebuild --platform android --no-install
 
           # 3. Запуск сборки
           eas build --platform android --local --profile ${{ github.event.inputs.profile }} --non-interactive
 
         env:
+          EXPO_NO_DOCTOR: "1"
           NODE_ENV: ${{ github.event.inputs.profile }}
           EAS_BUILD_ANDROID_KEYSTORE_PATH: "./release.jks"
           EAS_BUILD_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}

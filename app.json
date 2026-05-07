@@ -52,13 +52,9 @@
         "NEARBY_WIFI_DEVICES",
         "CHANGE_WIFI_MULTICAST_STATE",
         "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_MICROPHONE"
-      ],
-      "foregroundService": {
-        "types": [
-          "microphone"
-        ]
-      }
+        "FOREGROUND_SERVICE_MICROPHONE",
+        "WAKE_LOCK"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -70,7 +66,19 @@
           }
         }
       ],
-      "expo-font"
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true,
+            "compileSdkVersion": 34,
+            "targetSdkVersion": 34,
+            "buildToolsVersion": "34.0.0"
+          }
+        }
+      ],
+      "expo-font",
+      "expo-build-properties"
     ],
     "experiments": {
       "typedRoutes": true,
