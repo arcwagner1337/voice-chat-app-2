@@ -38,7 +38,7 @@ jobs:
       - name: 🟢 Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
           cache: ${{ github.event.inputs.package_manager == 'npm' && 'npm' || '' }}
 
       - name: 🚀 Setup Bun
@@ -87,7 +87,7 @@ jobs:
           # 1. Глобальный конфиг Gradle (самый приоритетный способ)
           mkdir -p ~/.gradle
           echo "kotlin.plugin.suppressKotlinVersionCompatibilityCheck=true" >> ~/.gradle/gradle.properties
-          
+
           # 2. Запуск сборки
           eas build --platform ${{ github.event.inputs.platform }} --local --profile ${{ github.event.inputs.profile }} --non-interactive --clear-cache
         env:
