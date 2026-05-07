@@ -1,123 +1,117 @@
 import { Stack } from 'expo-router';
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, FlatList, PermissionsAndroid, Platform } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, TouchableOpacity, FlatList, PermissionsAndroid, Platform, Alert } from 'react-native';
 import Zeroconf from 'react-native-zeroconf';
 import InCallManager from 'react-native-incall-manager';
-import {
-  ScreenCapturePickerView,
-  RTCPeerConnection,
-  RTCIceCandidate,
-  RTCSessionDescription,
-  RTCView,
-  MediaStream,
-  MediaStreamTrack,
-  mediaDevices,
-  registerGlobals
-} from 'react-native-webrtc';
+import { mediaDevices, RTCView } from 'react-native-webrtc';
+
 const zeroconf = new Zeroconf();
+const SERVICE_TYPE = 'voicechat';
 
 export default function MeshChatScreen() {
   const [isScanning, setIsScanning] = useState(false);
   const [devices, setDevices] = useState<any[]>([]);
   const [localStream, setLocalStream] = useState<any>(null);
   const [isEchoActive, setIsEchoActive] = useState(false);
+  const [myServiceName, setMyServiceName] = useState(`User-${Math.floor(Math.random() * 1000)}`);
+
+  // Запрос разрешений
   const requestPermissions = async () => {
     if (Platform.OS === 'android') {
-      const granted = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-        {
-          title: "Разрешение на микрофон",
-          message: "Приложению нужен доступ к микрофону для чата",
-          buttonNeutral: "Позже",
-          buttonNegative: "Отмена",
-          buttonPositive: "ОК"
-        }
-      );
-      return granted === PermissionsAndroid.RESULTS.GRANTED;
+      try {
+        const granted = await PermissionsAndroid.requestMultiple([
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION, // Нужно для Zeroconf на Android
+        ]);
+        return (
+          granted['android.permission.RECORD_AUDIO'] === PermissionsAndroid.RESULTS.GRANTED &&
+          granted['android.permission.ACCESS_FINE_LOCATION'] === PermissionsAndroid.RESULTS.GRANTED
+        );
+      } catch (err) {
+        return false;
+      }
     }
     return true;
   };
-  const toggleEcho = async () => {
 
+  // Эхо-тест (Локальная проверка)
+  const toggleEcho = async () => {
     if (isEchoActive) {
       localStream?.getTracks().forEach((track: any) => track.stop());
+      InCallManager.stop();
       setLocalStream(null);
       setIsEchoActive(false);
     } else {
-      // 1. СНАЧАЛА СПРАШИВАЕМ РАЗРЕШЕНИЕ
       const hasPermission = await requestPermissions();
       if (!hasPermission) {
-        alert("Без разрешения на микрофон ничего не заработает!");
+        Alert.alert("Ошибка", "Нужны разрешения на микрофон и геолокацию (для поиска Wi-Fi устройств)");
         return;
       }
 
       try {
-        const check = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
-        alert("Манифест разрешает микрофон?: " + check);
+        InCallManager.start({ media: 'audio' });
+
+        // Даем нативному слою 500мс "прогреться"
+        await new Promise(resolve => setTimeout(resolve, 500));
 
         const stream = await mediaDevices.getUserMedia({
-          audio: {
-            // Явно указываем, что нам нужно "живое" аудио без лишних надстроек
-            mandatory: {
-              googEchoCancellation: true,
-              googAutoGainControl: true,
-              googNoiseSuppression: true,
-              googHighpassFilter: true,
-            },
-            optional: []
-          } as any,
+          audio: true,
           video: false,
         });
+
+        // Настройка звука
         InCallManager.start({ media: 'audio' });
         InCallManager.setForceSpeakerphoneOn(true);
-        const audioTrack = stream.getAudioTracks()[0];
-        console.log("Track Status:", audioTrack.readyState);
-        console.log("Track ID:", audioTrack.id);
+
+        console.log("Track ID:", stream.getAudioTracks()[0]?.id);
 
         setLocalStream(stream);
         setIsEchoActive(true);
       } catch (err: any) {
-        alert("ОШИБКА: " + err.message); // Выведет точную причину (например, Permission Denied или Device Found)
-        console.log(err);
+        Alert.alert("Ошибка микрофона", err.message);
       }
     }
   };
 
-
+  // Управление Zeroconf (Поиск и Видимость)
   useEffect(() => {
-    // Слушатели событий поиска
+    // 1. Слушатели поиска
     zeroconf.on('start', () => setIsScanning(true));
     zeroconf.on('stop', () => setIsScanning(false));
-    zeroconf.on('resolved', (service: any) => {
-      setDevices((prev) => [...prev, service]);
+    zeroconf.on('resolved', (service) => {
+      // Не добавляем самих себя в список
+      if (service.name !== myServiceName) {
+        setDevices((prev) => {
+          if (prev.find(d => d.name === service.name)) return prev;
+          return [...prev, service];
+        });
+      }
     });
+
+    zeroconf.on('error', (err) => console.log('Zeroconf Error:', err));
+
+    // 2. СТАТЬ ВИДИМЫМ (Объявить о себе в сети)
+    try {
+      console.log("Публикация сервиса:", myServiceName);
+      // Добавляем нижнее подчеркивание и приводим порт к строке
+      zeroconf.publishService('_voicechat', '_tcp', 'local.', myServiceName, 12345);
+    } catch (e) {
+      console.log("Ошибка публикации:", e);
+    }
 
     return () => {
       zeroconf.stop();
+      try {
+        zeroconf.publishService('_voicechat', '_tcp', 'local.', myServiceName, 12345);
+      } catch (e) { }
       zeroconf.removeAllListeners();
     };
-  }, []);
-
-  const startLocalAudio = async () => {
-    const stream = await mediaDevices.getUserMedia({
-      audio: {
-        mandatory: {
-          googEchoCancellation: true,
-          googAutoGainControl: true,
-          googNoiseSuppression: true,
-          googHighpassFilter: true,
-        },
-        optional: []
-      } as any,
-      video: false,
-    });
-    setLocalStream(stream);
-  };
+  }, [myServiceName]);
 
   const startDiscovery = () => {
     setDevices([]);
-    // Ищем только наш тип сервиса (назовем его _voicechat)
-    zeroconf.scan('voicechat', 'tcp', 'local.');
+    // Важно: _voicechat и _tcp
+    zeroconf.scan('_voicechat', '_tcp', 'local.');
   };
 
   const stopDiscovery = () => {
@@ -126,67 +120,63 @@ export default function MeshChatScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Mesh Voice' }} />
+      <Stack.Screen options={{ title: 'Mesh Voice Chat' }} />
 
       <View className="flex-1 bg-emerald-900 p-6">
-        {isEchoActive && (
-          <View className="items-center mb-4">
-            <Text className="text-red-400 animate-pulse font-bold">● ИДЕТ ЗАПИСЬ И ВОСПРОИЗВЕДЕНИЕ</Text>
-            {/* 
-               Для аудио RTCView не обязателен, но он помогает 
-               управлять потоком. Главное — включить динамик.
-            */}
-            <RTCView
-              streamURL={localStream?.toURL()}
-              style={{ width: 0, height: 0 }} // Скрываем, так как видео нет
-            />
-          </View>
-        )}
 
+        {/* Индикатор работы */}
+        <View className="mb-6 items-center">
+          <Text className="text-emerald-300 font-bold">Ваше имя: {myServiceName}</Text>
+          {isEchoActive && (
+            <View className="flex-row items-center mt-2">
+              <View className="w-3 h-3 bg-red-500 rounded-full animate-pulse mr-2" />
+              <Text className="text-red-400 font-bold">МИКРОФОН АКТИВЕН</Text>
+              <RTCView streamURL={localStream?.toURL()} style={{ width: 0, height: 0 }} />
+            </View>
+          )}
+        </View>
 
-        {/* Список найденных устройств */}
-        <Text className="text-white text-2xl font-bold mb-4">Локальные соседи</Text>
-
+        {/* Список соседей */}
+        <Text className="text-white text-xl font-bold mb-4">Устройства рядом:</Text>
         <FlatList
           data={devices}
           keyExtractor={(item) => item.name}
           renderItem={({ item }) => (
             <TouchableOpacity
-              className="bg-emerald-700 p-4 rounded-xl mb-2"
-              onPress={() => console.log('Подключение к:', item.addresses[0])}
+              className="bg-emerald-700 p-4 rounded-2xl mb-3 border border-emerald-500"
+              onPress={() => Alert.alert("Подключение", `Вызываем ${item.name} по адресу ${item.addresses[0]}`)}
             >
-              <Text className="text-white font-semibold">{item.name}</Text>
-              <Text className="text-emerald-300 text-xs">{item.addresses[0]}</Text>
+              <Text className="text-white font-bold text-lg">{item.name}</Text>
+              <Text className="text-emerald-300 text-xs">{item.addresses[0] || 'Получение IP...'}</Text>
             </TouchableOpacity>
           )}
           ListEmptyComponent={
-            <Text className="text-emerald-400 italic">Никого не найдено. Нажми "Поиск"</Text>
+            <View className="p-10 border-2 border-dashed border-emerald-700 rounded-2xl">
+              <Text className="text-emerald-500 text-center italic">
+                {isScanning ? 'Ищем соседей...' : 'Никого нет. Нажми "Поиск"'}
+              </Text>
+            </View>
           }
         />
-        <TouchableOpacity
-          onPress={toggleEcho}
-          className={`p-4 rounded-2xl items-center ${isEchoActive ? 'bg-red-500' : 'bg-blue-500'}`}
-        >
-          <Text className="text-white font-bold text-center">
-            {isEchoActive ? 'ВЫКЛЮЧИТЬ ЭХО' : 'ПРОВЕРИТЬ ГОЛОС (ЭХО)'}
-          </Text>
-        </TouchableOpacity>
-        {/* Панель управления */}
-        <View className="mt-auto space-y-3">
+
+        {/* Кнопки управления */}
+        <View className="mt-6 space-y-3">
           <TouchableOpacity
-            onPress={isScanning ? stopDiscovery : startDiscovery}
-            className={`p-4 rounded-2xl items-center ${isScanning ? 'bg-red-500' : 'bg-emerald-500'}`}
+            onPress={toggleEcho}
+            className={`p-4 rounded-2xl items-center shadow-lg ${isEchoActive ? 'bg-red-600' : 'bg-blue-600'}`}
           >
             <Text className="text-white font-bold">
-              {isScanning ? 'ОСТАНОВИТЬ ПОИСК' : 'НАЙТИ СОСЕДЕЙ'}
+              {isEchoActive ? 'ВЫКЛЮЧИТЬ МИКРОФОН' : 'ПРОВЕРИТЬ СВОЙ ГОЛОС'}
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            onPress={startLocalAudio}
-            className="p-4 bg-white/10 border border-emerald-400 rounded-2xl items-center"
+            onPress={isScanning ? stopDiscovery : startDiscovery}
+            className={`p-4 rounded-2xl items-center border-2 ${isScanning ? 'border-red-500' : 'border-emerald-400 bg-emerald-800'}`}
           >
-            <Text className="text-emerald-400 font-bold">ПРОВЕРИТЬ МИКРОФОН</Text>
+            <Text className={isScanning ? 'text-red-500 font-bold' : 'text-emerald-400 font-bold'}>
+              {isScanning ? 'ОСТАНОВИТЬ ПОИСК' : 'НАЙТИ СОСЕДЕЙ'}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>

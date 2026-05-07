@@ -53,7 +53,12 @@
         "CHANGE_WIFI_MULTICAST_STATE",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_MICROPHONE"
-      ]
+      ],
+      "foregroundService": {
+        "types": [
+          "microphone"
+        ]
+      }
     },
     "plugins": [
       "expo-router",
