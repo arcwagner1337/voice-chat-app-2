@@ -61,9 +61,9 @@ jobs:
       - name: 📦 Install dependencies
         run: |
           if [ "${{ github.event.inputs.package_manager }}" = "bun" ]; then
-            bun install
+            bun install --legacy-peer-deps
           else
-            npm install
+            npm install --legacy-peer-deps
           fi
           # Удаляем конфликтующие типы по совету expo doctor
           npm uninstall @types/react-native --save-dev || true
