@@ -84,15 +84,16 @@ jobs:
 
       - name: 🚀 Build with EAS
         run: |
-          # 1. Глобальный конфиг
+          # 1. Глобальный конфиг Gradle
           mkdir -p ~/.gradle
           echo "kotlin.plugin.suppressKotlinVersionCompatibilityCheck=true" >> ~/.gradle/gradle.properties
-          echo "android.enableDexingArtifactTransform.desugaring=false" >> ~/.gradle/gradle.properties
 
-          # 2. Генерируем нативную папку ПЕРЕД сборкой, чтобы убедиться, что плагины применились
-          npx expo prebuild --platform android
+          # ЗАМЕНЯЕМ СТАРЫЙ ФЛАГ НА ЭТОТ:
+          echo "android.useFullClasspathForDexingTransform=true" >> ~/.gradle/gradle.properties
 
-          # 3. Запуск сборки (без флага --clear-cache, так как мы уже сделали чистый prebuild)
+          # 2. Обязательно убедись, что нет ручного создания папки android/
+
+          # 3. Запуск сборки
           eas build --platform android --local --profile ${{ github.event.inputs.profile }} --non-interactive
 
         env:
