@@ -27,7 +27,8 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ github.event.inputs.platform == 'ios' && 'macos-latest' || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.inputs.platform == 'ios' && 'macos-latest' ||
+      'ubuntu-latest' }}
     steps:
       - name: ⬇️ Checkout repository
         uses: actions/checkout@v4
@@ -74,14 +75,19 @@ jobs:
 
       - name: 🔑 Decode Keystore (Android)
         if: ${{ github.event.inputs.platform == 'android' }}
-        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > ./release.jks
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode >
+          ./release.jks
+
+      - name: 📄 Create google-services.json
+        if: ${{ github.event.inputs.platform == 'android' }}
+        run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > google-services.json
 
       - name: 🚀 Build with EAS
         run: |
           # 1. Глобальный конфиг Gradle (самый приоритетный способ)
           mkdir -p ~/.gradle
           echo "kotlin.plugin.suppressKotlinVersionCompatibilityCheck=true" >> ~/.gradle/gradle.properties
-          
+
           # 2. Локальный конфиг (на случай, если EAS подхватит его при пребилде)
           mkdir -p android
           echo "kotlin.plugin.suppressKotlinVersionCompatibilityCheck=true" >> android/gradle.properties
@@ -103,7 +109,8 @@ jobs:
       - name: 📁 Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.inputs.platform }}-${{ github.event.inputs.profile }}-${{ github.run_id }}
+          name: ${{ github.event.inputs.platform }}-${{ github.event.inputs.profile }}-${{
+            github.run_id }}
           path: |
             **/*.apk
             **/*.aab
