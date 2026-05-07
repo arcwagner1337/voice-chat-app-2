@@ -12,7 +12,7 @@
     "build:ios": "npx expo run:ios"
   },
   "dependencies": {
-    "@config-plugins/react-native-webrtc": "^14.0.0",
+    "@config-plugins/react-native-webrtc": "13.0.0",
     "@expo/vector-icons": "^15.0.2",
     "@react-native-firebase/app": "^24.0.0",
     "@react-native-firebase/firestore": "^24.0.0",
