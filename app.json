@@ -50,7 +50,9 @@
         "BLUETOOTH_CONNECT",
         "BLUETOOTH_SCAN",
         "NEARBY_WIFI_DEVICES",
-        "CHANGE_WIFI_MULTICAST_STATE"
+        "CHANGE_WIFI_MULTICAST_STATE",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MICROPHONE"
       ]
     },
     "plugins": [
