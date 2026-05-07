@@ -2,8 +2,18 @@ import { Stack } from 'expo-router';
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, FlatList, PermissionsAndroid, Platform } from 'react-native';
 import Zeroconf from 'react-native-zeroconf';
-import { mediaDevices, RTCView } from 'react-native-webrtc';
-
+import InCallManager from 'react-native-incall-manager';
+import {
+  ScreenCapturePickerView,
+  RTCPeerConnection,
+  RTCIceCandidate,
+  RTCSessionDescription,
+  RTCView,
+  MediaStream,
+  MediaStreamTrack,
+  mediaDevices,
+  registerGlobals
+} from 'react-native-webrtc';
 const zeroconf = new Zeroconf();
 
 export default function MeshChatScreen() {
@@ -28,6 +38,7 @@ export default function MeshChatScreen() {
     return true;
   };
   const toggleEcho = async () => {
+
     if (isEchoActive) {
       localStream?.getTracks().forEach((track: any) => track.stop());
       setLocalStream(null);
@@ -46,13 +57,23 @@ export default function MeshChatScreen() {
 
         const stream = await mediaDevices.getUserMedia({
           audio: {
-            echoCancellation: false, // Отключи для теста, чтобы исключить программное глушение
-            noiseSuppression: false,
-            autoGainControl: false
+            // Явно указываем, что нам нужно "живое" аудио без лишних надстроек
+            mandatory: {
+              googEchoCancellation: true,
+              googAutoGainControl: true,
+              googNoiseSuppression: true,
+              googHighpassFilter: true,
+            },
+            optional: []
           } as any,
           video: false,
         });
-        console.log(stream)
+        InCallManager.start({ media: 'audio' });
+        InCallManager.setForceSpeakerphoneOn(true);
+        const audioTrack = stream.getAudioTracks()[0];
+        console.log("Track Status:", audioTrack.readyState);
+        console.log("Track ID:", audioTrack.id);
+
         setLocalStream(stream);
         setIsEchoActive(true);
       } catch (err: any) {
@@ -78,7 +99,18 @@ export default function MeshChatScreen() {
   }, []);
 
   const startLocalAudio = async () => {
-    const stream = await mediaDevices.getUserMedia({ audio: true, video: false });
+    const stream = await mediaDevices.getUserMedia({
+      audio: {
+        mandatory: {
+          googEchoCancellation: true,
+          googAutoGainControl: true,
+          googNoiseSuppression: true,
+          googHighpassFilter: true,
+        },
+        optional: []
+      } as any,
+      video: false,
+    });
     setLocalStream(stream);
   };
 

@@ -84,12 +84,17 @@ jobs:
 
       - name: 🚀 Build with EAS
         run: |
-          # 1. Глобальный конфиг Gradle (самый приоритетный способ)
+          # 1. Глобальный конфиг
           mkdir -p ~/.gradle
           echo "kotlin.plugin.suppressKotlinVersionCompatibilityCheck=true" >> ~/.gradle/gradle.properties
+          echo "android.enableDexingArtifactTransform.desugaring=false" >> ~/.gradle/gradle.properties
 
-          # 2. Запуск сборки
-          eas build --platform ${{ github.event.inputs.platform }} --local --profile ${{ github.event.inputs.profile }} --non-interactive --clear-cache
+          # 2. Генерируем нативную папку ПЕРЕД сборкой, чтобы убедиться, что плагины применились
+          npx expo prebuild --platform android
+
+          # 3. Запуск сборки (без флага --clear-cache, так как мы уже сделали чистый prebuild)
+          eas build --platform android --local --profile ${{ github.event.inputs.profile }} --non-interactive
+
         env:
           NODE_ENV: ${{ github.event.inputs.profile }}
           EAS_BUILD_ANDROID_KEYSTORE_PATH: "./release.jks"

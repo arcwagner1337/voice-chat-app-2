@@ -53,16 +53,23 @@
         "CHANGE_WIFI_MULTICAST_STATE",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_MICROPHONE"
-      ]
+      ],
+      "config": {
+        "usesFeatures": [
+          {
+            "name": "android.hardware.microphone",
+            "required": true
+          }
+        ]
+      }
     },
     "plugins": [
       "expo-router",
       [
         "@config-plugins/react-native-webrtc",
         {
-          "appleStatus": "experimental",
           "android": {
-            "microphonePermission": "Доступ к микрофону для связи"
+            "microphonePermission": "Allow access to microphone"
           }
         }
       ]
