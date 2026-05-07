@@ -105,6 +105,29 @@ jobs:
           # 4. Прокидываем флаг как системную переменную проекта (System Property)
           ORG_GRADLE_PROJECT_kotlin.plugin.suppressKotlinVersionCompatibilityCheck: "true"
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.console=plain"
+      - name: 📱 Generate QR for APK
+        if: ${{ github.event.inputs.platform == 'android' }}
+        run: |
+          # 1. Находим путь к APK (EAS обычно кладет его глубоко в папки)
+          APK_PATH=$(find . -name "*.apk" | head -n 1)
+
+          if [ -z "$APK_PATH" ]; then
+            echo "APK not found, skipping QR generation"
+            exit 0
+          fi
+
+          # 2. Загружаем на временный хостинг (ссылка живет 14 дней)
+          DOWNLOAD_URL=$(curl --upload-file "$APK_PATH" https://transfer.sh)
+          echo "Download URL: $DOWNLOAD_URL"
+
+          # 3. Генерируем QR-код прямо в консоль (используем qrencode)
+          sudo apt-get update && sudo apt-get install -y qrencode
+          qrencode -t ANSI256 "$DOWNLOAD_URL"
+
+          # 4. Сохраняем ссылку в логах, чтобы не потерять
+          echo "##########################################################"
+          echo "СКАЧАТЬ APK МОЖНО ТУТ: $DOWNLOAD_URL"
+          echo "##########################################################"
 
       - name: 📁 Upload Artifacts
         uses: actions/upload-artifact@v4
