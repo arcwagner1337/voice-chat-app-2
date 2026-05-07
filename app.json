@@ -53,15 +53,7 @@
         "CHANGE_WIFI_MULTICAST_STATE",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_MICROPHONE"
-      ],
-      "config": {
-        "usesFeatures": [
-          {
-            "name": "android.hardware.microphone",
-            "required": true
-          }
-        ]
-      }
+      ]
     },
     "plugins": [
       "expo-router",
@@ -72,7 +64,8 @@
             "microphonePermission": "Allow access to microphone"
           }
         }
-      ]
+      ],
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,
