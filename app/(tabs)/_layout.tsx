@@ -1,37 +1,52 @@
-import { Link, Tabs } from "expo-router";
-
-import { HeaderButton } from '../../components/HeaderButton';
-import { TabBarIcon } from '../../components/TabBarIcon';
+import React from 'react';
+import { Tabs } from 'expo-router';
+import { View } from 'react-native';
+import { FontAwesome5 } from '@expo/vector-icons'; // Популярные иконки
 
 export default function TabLayout() {
-
   return (
     <Tabs
       screenOptions={{
-
-        tabBarActiveTintColor: 'black',
-
+        // 1. Цвета активных и неактивных вкладок
+        tabBarActiveTintColor: '#22d3ee',   // Cyan-400
+        tabBarInactiveTintColor: '#475569', // Slate-500
+        
+        // 2. Стиль самой панели
+        tabBarStyle: {
+          backgroundColor: '#020617',       // Slate-950 (как фон приложения)
+          borderTopWidth: 1,
+          borderTopColor: '#1e293b',        // Slate-800 (тонкая линия)
+          height: 60,                       // Чуть выше стандартной
+          paddingBottom: 10,
+          paddingTop: 10,
+        },
+        headerStyle: {
+          backgroundColor: '#020617',
+        },
+        headerTintColor: '#22d3ee',
+        headerTitleStyle: {
+          fontFamily: 'monospace',
+          fontSize: 14,
+        },
       }}>
+      
+      {/* ПЕРВАЯ ВКЛАДКА (Инфо) */}
       <Tabs.Screen
-        name='index'
+        name="index"
         options={{
-          title: 'Tab One',
-          tabBarIcon: ({ color }) => <TabBarIcon name="code" color={color} />,
-          headerRight: () => (
-            <Link href='/modal' asChild>
-              <HeaderButton />
-            </Link>
-          ),
+          title: 'DASHBOARD',
+          tabBarIcon: ({ color }) => <FontAwesome5 name="terminal" size={18} color={color} />,
         }}
       />
+
+      {/* ВТОРАЯ ВКЛАДКА (Рация) */}
       <Tabs.Screen
         name="two"
         options={{
-          title: 'Tab Two',
-          tabBarIcon: ({ color }) => <TabBarIcon name="code" color={color} />,
+          title: 'COMM_CENTER',
+          tabBarIcon: ({ color }) => <FontAwesome5 name="broadcast-tower" size={18} color={color} />,
         }}
       />
     </Tabs>
   );
 }
-
