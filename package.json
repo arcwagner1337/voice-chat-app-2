@@ -49,8 +49,7 @@
     "react-native-web": "^0.21.0",
     "react-native-webrtc": "^124.0.7",
     "react-native-worklets": "0.5.1",
-    "react-native-zeroconf": "^0.14.0",
-    "react-native-audio-track": "^1.0.1"
+    "react-native-zeroconf": "^0.14.0"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
