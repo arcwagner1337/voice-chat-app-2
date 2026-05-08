@@ -5,26 +5,58 @@ import Zeroconf from 'react-native-zeroconf';
 import InCallManager from 'react-native-incall-manager';
 import { mediaDevices, RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCView } from 'react-native-webrtc';
 import TcpSocket from 'react-native-tcp-socket';
+import dgram from 'react-native-udp';
+import { Buffer } from 'buffer';
+import LiveAudioStream from 'react-native-live-audio-stream';
 
 const zeroconf = new Zeroconf();
 const TCP_PORT = 12345;
+const LAPTOP_IP = '10.90.218.88'; // Твой IP ноута
+const UDP_PORT = 5000;
 
 export default function MeshChatScreen() {
-  const iceQueue = useRef<any[]>([]);
   const [myServiceName] = useState(`User-${Math.floor(Math.random() * 1000)}`);
   const [devices, setDevices] = useState<any[]>([]);
-  const [isScanning, setIsScanning] = useState(false);
-  const [isPublished, setIsPublished] = useState(false);
   const [remoteStream, setRemoteStream] = useState<any>(null);
+  const [isPublished, setIsPublished] = useState(false);
+  const [isUdpStreaming, setIsUdpStreaming] = useState(false);
 
   const peerConn = useRef<RTCPeerConnection | null>(null);
   const localStream = useRef<any>(null);
+  const iceQueue = useRef<any[]>([]);
   const server = useRef<any>(null);
 
+  const udpSocket = useRef<any>(null);
+  const activeUdpRef = useRef(false);
+
   useEffect(() => {
+    // 1. Инициализация UDP сокета для трансляции на ноут
+    const s = dgram.createSocket({ type: 'udp4' });
+    s.bind();
+    udpSocket.current = s;
+
+    // 2. Настройка захвата сырого звука (как в первом тесте)
+    LiveAudioStream.init({
+      sampleRate: 44100,
+      channels: 1,
+      bitsPerSample: 16,
+      audioSource: 1,
+      bufferSize: 4096,
+      wavFile: ""
+    });
+
+    LiveAudioStream.on('data', (data: any) => {
+      if (!activeUdpRef.current || !udpSocket.current) return;
+      try {
+        const chunk = typeof data === 'string' ? Buffer.from(data, 'base64') : Buffer.from(data);
+        udpSocket.current.send(chunk, 0, chunk.length, UDP_PORT, LAPTOP_IP, (err: any) => {
+          if (err) console.log("UDP Send Error");
+        });
+      } catch (e) { }
+    });
+
     setupTcpServer();
-    zeroconf.on('start', () => setIsScanning(true));
-    zeroconf.on('stop', () => setIsScanning(false));
+
     zeroconf.on('resolved', (service) => {
       if (service.name !== myServiceName) {
         setDevices((prev) => prev.find(d => d.name === service.name) ? prev : [...prev, service]);
@@ -36,78 +68,82 @@ export default function MeshChatScreen() {
     };
   }, []);
 
-  const stopAll = () => {
-    zeroconf.stop();
-    zeroconf.unpublishService(myServiceName);
-    server.current?.close();
-    if (peerConn.current) peerConn.current.close();
-    if (localStream.current) localStream.current.getTracks().forEach((t: any) => t.stop());
-    setRemoteStream(null);
-    InCallManager.stop();
-  };
-
   const setupTcpServer = () => {
     server.current = TcpSocket.createServer((socket) => {
       socket.on('data', async (data) => {
         try {
           const msg = JSON.parse(data.toString());
-          console.log("TCP MSG:", msg.type);
-
-          if (msg.type === 'offer') {
-             await handleOffer(msg.offer, msg.fromIp);
-          } else if (msg.type === 'answer') {
-             await peerConn.current?.setRemoteDescription(new RTCSessionDescription(msg.answer));
-             processIceQueue();
-          } else if (msg.type === 'ice') {
-             if (peerConn.current?.remoteDescription) {
-               await peerConn.current.addIceCandidate(new RTCIceCandidate(msg.candidate));
-             } else {
-               iceQueue.current.push(msg.candidate);
-             }
+          if (msg.type === 'offer') await handleOffer(msg.offer, msg.fromIp);
+          if (msg.type === 'answer') {
+            await peerConn.current?.setRemoteDescription(new RTCSessionDescription(msg.answer));
+            processIceQueue();
           }
-        } catch (e) { console.log("TCP Parse Error:", e); }
+          if (msg.type === 'ice') {
+            if (peerConn.current?.remoteDescription) {
+              await peerConn.current.addIceCandidate(new RTCIceCandidate(msg.candidate));
+            } else {
+              iceQueue.current.push(msg.candidate);
+            }
+          }
+        } catch (e) { console.log("Signaling Err:", e); }
       });
     }).listen({ port: TCP_PORT, host: '0.0.0.0' });
   };
 
   const sendSignaling = (ip: string, data: any) => {
-    const client = TcpSocket.createConnection({ port: TCP_PORT, host: ip }, () => {
-      client.write(JSON.stringify(data));
-      
-      // setTimeout(() => client.destroy(), 1000);
-    });
-    client.on('error', (err) => console.log("TCP Send Err:", err.message));
+    try {
+      const client = TcpSocket.createConnection({ port: TCP_PORT, host: ip }, () => {
+        client.write(JSON.stringify(data));
+      });
+      client.on('error', (err) => console.log("TCP Signal Err:", err.message));
+    } catch (e) { console.log("Signaling Crash Prevented"); }
   };
 
+
   const setupPeer = async (remoteIp?: string) => {
-    if (peerConn.current) peerConn.current.close();
-    
-    peerConn.current = new RTCPeerConnection({ iceServers: [] });
-    const pc = peerConn.current as any;
+    try {
+      if (peerConn.current) peerConn.current.close();
+      peerConn.current = new RTCPeerConnection({ iceServers: [] });
+      const pc = peerConn.current as any;
 
-    pc.onicecandidate = (event: any) => {
-      if (event.candidate && remoteIp) {
-        sendSignaling(remoteIp, { type: 'ice', candidate: event.candidate });
-      }
-    };
+      pc.onicecandidate = (event: any) => {
+        if (event.candidate && remoteIp) {
+          sendSignaling(remoteIp, { type: 'ice', candidate: event.candidate });
+        }
+      };
 
-    pc.ontrack = (event: any) => {
-      if (event.streams && event.streams[0]) {
-        setRemoteStream(event.streams[0]);
-        InCallManager.start({ media: 'audio' });
-        InCallManager.setForceSpeakerphoneOn(true);
-      }
-    };
+      pc.ontrack = (event: any) => {
+        if (event.streams && event.streams[0]) {
+          setRemoteStream(event.streams[0]);
+          InCallManager.start({ media: 'audio' });
+          InCallManager.setForceSpeakerphoneOn(true);
+        }
+      };
 
-    const stream = await mediaDevices.getUserMedia({ audio: true, video: false });
-    localStream.current = stream;
-    stream.getTracks().forEach((track) => peerConn.current?.addTrack(track, stream));
+      const stream = await mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true } as any,
+        video: false
+      });
+
+      localStream.current = stream;
+      stream.getTracks().forEach((track) => peerConn.current?.addTrack(track, stream));
+
+      // ВКЛЮЧАЕМ UDP ТРАФИК
+      activeUdpRef.current = true;
+      setIsUdpStreaming(true);
+      LiveAudioStream.start();
+
+      console.log("МИКРОФОН ЗАХВАЧЕН, ТРАФИК ИДЕТ НА", LAPTOP_IP);
+
+    } catch (e: any) {
+      console.error("ОШИБКА ЗАХВАТА:", e.message);
+    }
   };
 
   const processIceQueue = async () => {
     while (iceQueue.current.length > 0) {
-      const candidate = iceQueue.current.shift();
-      await peerConn.current?.addIceCandidate(new RTCIceCandidate(candidate)).catch(console.log);
+      const cand = iceQueue.current.shift();
+      await peerConn.current?.addIceCandidate(new RTCIceCandidate(cand)).catch(() => { });
     }
   };
 
@@ -115,11 +151,13 @@ export default function MeshChatScreen() {
     await setupPeer(ip);
     const offer = await peerConn.current?.createOffer();
     await peerConn.current?.setLocalDescription(offer);
-    sendSignaling(ip, { type: 'offer', offer, fromIp: '127.0.0.1' }); // Тут в меше должен быть реальный IP
+    sendSignaling(ip, { type: 'offer', offer, fromIp: '127.0.0.1' });
   };
 
   const handleOffer = async (offer: any, fromIp: string) => {
-    await setupPeer(fromIp);
+    if (peerConn.current?.signalingState === 'stable') {
+      await setupPeer(fromIp);
+    }
     await peerConn.current?.setRemoteDescription(new RTCSessionDescription(offer));
     const answer = await peerConn.current?.createAnswer();
     await peerConn.current?.setLocalDescription(answer);
@@ -127,52 +165,103 @@ export default function MeshChatScreen() {
     processIceQueue();
   };
 
+  const stopAll = () => {
+    console.log("EMERGENCY_SHUTDOWN_INITIATED");
+    activeUdpRef.current = false;
+    setIsUdpStreaming(false);
+    LiveAudioStream.stop();
+    zeroconf.stop();
+    if (peerConn.current) {
+      peerConn.current.close();
+      peerConn.current = null;
+    }
+    InCallManager.stop();
+    setRemoteStream(null);
+    console.log("SHUTDOWN_COMPLETE");
+  };
+
+
   return (
-    <>
-      <Stack.Screen options={{ title: 'Mesh Voice' }} />
-      <View className="flex-1 bg-slate-900 p-6">
-        <View className="flex-row justify-between items-center mb-6">
-          <Text className="text-cyan-400 font-mono text-xs">ID: {myServiceName}</Text>
-          <TouchableOpacity onPress={stopAll} className="bg-red-900/50 px-3 py-1 rounded-full">
-            <Text className="text-red-400 text-xs">СБРОС</Text>
-          </TouchableOpacity>
+    <View className="flex-1 bg-slate-950 p-5">
+      <Stack.Screen options={{ title: 'COMM_CENTER', headerShown: false }} />
+
+      {/* HEADER STATUS */}
+      <View className="items-center mb-8 pt-10">
+        <View className="bg-slate-900 px-4 py-1 rounded-full border border-slate-800">
+          <Text className="text-cyan-500 font-mono text-[10px]">LOCAL_ID: {myServiceName}</Text>
         </View>
 
-        <TouchableOpacity 
-          onPress={() => startCall('127.0.0.1')}
-          className="bg-cyan-600 p-4 rounded-2xl mb-8 items-center"
+        {isUdpStreaming && (
+          <View className="flex-row items-center mt-3 bg-red-500/10 px-3 py-1 rounded-md border border-red-500/20">
+            <View className="w-2 h-2 rounded-full bg-red-500 animate-pulse mr-2" />
+            <Text className="text-red-500 font-bold text-[10px] uppercase">UPLINK_TO_LAPTOP: ACTIVE</Text>
+          </View>
+        )}
+      </View>
+
+      {/* MAIN ACTION BUTTON */}
+      <TouchableOpacity
+        onPress={() => startCall('127.0.0.1')}
+        activeOpacity={0.7}
+        className="bg-cyan-600 p-6 rounded-3xl items-center mb-10 shadow-lg shadow-cyan-500/20 border-b-4 border-cyan-800"
+      >
+        <Text className="text-white font-black text-lg tracking-tighter">INITIATE_SYSTEM_TEST</Text>
+        <Text className="text-cyan-100 text-[10px] font-mono mt-1 opacity-70">LAPTOP + LOOPBACK_STREAM</Text>
+      </TouchableOpacity>
+
+      {/* DEVICES LIST */}
+      <Text className="text-slate-500 font-bold text-[11px] mb-4 tracking-[2px] uppercase px-2">
+      // Detected_Nodes:
+      </Text>
+
+      <FlatList
+        data={devices}
+        keyExtractor={(item) => item.name}
+        className="flex-1"
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            onPress={() => item.addresses?.[0] && startCall(item.addresses[0])}
+            className="bg-slate-900 border border-slate-800 p-4 rounded-2xl mb-3 flex-row justify-between items-center"
+          >
+            <View>
+              <Text className="text-white font-bold tracking-tight">{item.name}</Text>
+              <Text className="text-slate-500 font-mono text-[10px] mt-1">{item.addresses?.[0] || 'RESOLVING...'}</Text>
+            </View>
+            <View className="bg-cyan-500/10 px-2 py-1 rounded border border-cyan-500/20">
+              <Text className="text-cyan-500 font-mono text-[8px]">CONNECT</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+        ListEmptyComponent={
+          <View className="py-10 items-center border border-dashed border-slate-800 rounded-2xl">
+            <Text className="text-slate-600 font-mono text-xs italic">SCANNING_FOR_NODES...</Text>
+          </View>
+        }
+      />
+
+      {/* BOTTOM CONTROLS */}
+      <View className="mt-auto gap-y-3 pt-4">
+        <TouchableOpacity
+          onPress={() => { setDevices([]); zeroconf.scan('_voicechat', '_tcp', 'local.'); }}
+          className="py-4 rounded-2xl border border-cyan-500/50 items-center"
         >
-          <Text className="text-white font-bold">🧪 ТЕСТ САМОГО СЕБЯ</Text>
+          <Text className="text-cyan-500 font-bold text-xs tracking-widest uppercase">Refresh_Network</Text>
         </TouchableOpacity>
 
-        <Text className="text-white text-lg font-bold mb-3">Устройства в Wi-Fi:</Text>
-        <FlatList
-          data={devices}
-          keyExtractor={(item) => item.name}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              className="bg-slate-800 p-4 rounded-xl mb-2 border border-slate-700"
-              onPress={() => item.addresses?.[0] && startCall(item.addresses[0])}
-            >
-              <Text className="text-white font-bold">{item.name}</Text>
-              <Text className="text-cyan-600 text-xs">{item.addresses?.[0] || 'Resolving...'}</Text>
-            </TouchableOpacity>
-          )}
-        />
-
-        <View className="mt-auto space-y-2">
-          <TouchableOpacity onPress={() => { setDevices([]); zeroconf.scan('_voicechat', '_tcp', 'local.'); }} 
-            className="p-4 rounded-xl border border-cyan-500 items-center">
-            <Text className="text-cyan-400 font-bold">НАЙТИ СОСЕДЕЙ</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => { zeroconf.publishService('_voicechat', '_tcp', 'local.', myServiceName, TCP_PORT); setIsPublished(true); }}
-            className={`p-4 rounded-xl items-center ${isPublished ? 'bg-green-600' : 'bg-slate-700'}`}>
-            <Text className="text-white font-bold">{isPublished ? 'ВИДИМ ДЛЯ ВСЕХ' : 'СТАТЬ ВИДИМЫМ'}</Text>
-          </TouchableOpacity>
-        </View>
-        
-        {remoteStream && <RTCView streamURL={remoteStream.toURL()} style={{ width: 0, height: 0 }} />}
+        <TouchableOpacity
+          onPress={stopAll}
+          className="py-4 rounded-2xl bg-red-950/30 border border-red-900/50 items-center"
+        >
+          <Text className="text-red-500 font-bold text-xs tracking-widest uppercase">Emergency_Shutdown</Text>
+        </TouchableOpacity>
       </View>
-    </>
+
+      {/* HIDDEN WEBRTC RENDERER */}
+      {remoteStream && (
+        <View className="absolute w-1 h-1 opacity-0">
+          <RTCView streamURL={remoteStream.toURL()} style={{ flex: 1 }} />
+        </View>
+      )}
+    </View>
   );
 }
