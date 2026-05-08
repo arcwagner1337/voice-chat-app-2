@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, FlatList, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, Alert, TextInput } from 'react-native';
 import Zeroconf from 'react-native-zeroconf';
 import InCallManager from 'react-native-incall-manager';
 import { mediaDevices, RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCView } from 'react-native-webrtc';
@@ -25,6 +25,10 @@ export default function MeshChatScreen() {
   const localStream = useRef<any>(null);
   const iceQueue = useRef<any[]>([]);
   const server = useRef<any>(null);
+
+  const [laptopIp, setLaptopIp] = useState('10.90.218.88');
+  const [udpPort, setUdpPort] = useState('5000');
+  const [tcpPort, setTcpPort] = useState('12345');
 
   const udpSocket = useRef<any>(null);
   const activeUdpRef = useRef(false);
@@ -208,7 +212,47 @@ export default function MeshChatScreen() {
         <Text className="text-white font-black text-lg tracking-tighter">INITIATE_SYSTEM_TEST</Text>
         <Text className="text-cyan-100 text-[10px] font-mono mt-1 opacity-70">LAPTOP + LOOPBACK_STREAM</Text>
       </TouchableOpacity>
+      {/* CONFIGURATION SECTION */}
+      <View className="bg-slate-900 border border-slate-800 rounded-3xl p-5 mb-6 shadow-2xl">
+        <Text className="text-slate-500 font-mono text-[10px] mb-4 uppercase tracking-widest">
+            // Uplink_&_Security_Config:
+        </Text>
 
+        <View className="mb-4">
+          <Text className="text-slate-600 font-mono text-[9px] mb-2 ml-1">LAPTOP_IPv4_TARGET</Text>
+          <TextInput
+            className="bg-slate-950 border border-slate-800 rounded-2xl p-4 text-cyan-400 font-mono text-sm"
+            style={{ minHeight: 50 }} // Явная высота для надежности
+            value={laptopIp}
+            onChangeText={setLaptopIp}
+            placeholder="0.0.0.0"
+            placeholderTextColor="#334155"
+          />
+        </View>
+
+        <View className="flex-row justify-between">
+          <View style={{ width: '48%' }}>
+            <Text className="text-slate-600 font-mono text-[9px] mb-2 ml-1">UDP_PORT</Text>
+            <TextInput
+              className="bg-slate-950 border border-slate-800 rounded-2xl p-4 text-cyan-400 font-mono text-sm"
+              style={{ minHeight: 50 }}
+              value={udpPort}
+              onChangeText={setUdpPort}
+              keyboardType="numeric"
+            />
+          </View>
+          <View style={{ width: '48%' }}>
+            <Text className="text-slate-600 font-mono text-[9px] mb-2 ml-1">ROOM_PASS</Text>
+            <TextInput
+              className="bg-slate-950 border border-emerald-900 rounded-2xl p-4 text-emerald-400 font-mono text-sm"
+              style={{ minHeight: 50 }}
+              value={tcpPort}
+              onChangeText={setTcpPort}
+              keyboardType="numeric"
+            />
+          </View>
+        </View>
+      </View>
       {/* DEVICES LIST */}
       <Text className="text-slate-500 font-bold text-[11px] mb-4 tracking-[2px] uppercase px-2">
       // Detected_Nodes:
@@ -238,6 +282,7 @@ export default function MeshChatScreen() {
           </View>
         }
       />
+
 
       {/* BOTTOM CONTROLS */}
       <View className="mt-auto gap-y-3 pt-4">
