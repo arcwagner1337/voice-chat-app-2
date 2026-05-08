@@ -9,7 +9,8 @@
     "web": "expo start --web",
     "prebuild": "npx expo prebuild",
     "build:android": "npx expo run:android",
-    "build:ios": "npx expo run:ios"
+    "build:ios": "npx expo run:ios",
+    "ghbuild:a":"gh workflow run 'Build Mobile (Manual)' -f platform=android -f profile=development"
   },
   "dependencies": {
     "@config-plugins/react-native-webrtc": "13.0.0",
