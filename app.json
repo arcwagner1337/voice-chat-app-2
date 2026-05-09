@@ -75,7 +75,12 @@
             "targetSdkVersion": 35,
             "buildToolsVersion": "35.0.0",
             "usesCleartextTraffic": true,
-            "kotlinVersion": "2.0.21"
+            "kotlinVersion": "2.0.21",
+            "foregroundService": {
+              "notificationTitle": "Mesh Voice Active",
+              "notificationContent": "Приложение работает в фоновом режиме",
+              "icon": "./assets/icon.png"
+            }
           }
         }
       ]

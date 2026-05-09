@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, FlatList, Alert, TextInput } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, Alert, TextInput, PermissionsAndroid, Platform } from 'react-native';
 import Zeroconf from 'react-native-zeroconf';
 import InCallManager from 'react-native-incall-manager';
 import { mediaDevices, RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCView } from 'react-native-webrtc';
@@ -8,13 +8,14 @@ import TcpSocket from 'react-native-tcp-socket';
 import dgram from 'react-native-udp';
 import { Buffer } from 'buffer';
 import LiveAudioStream from 'react-native-live-audio-stream';
-
+import { activateKeepAwakeAsync, useKeepAwake } from 'expo-keep-awake';
 const zeroconf = new Zeroconf();
 const TCP_PORT = 12345;
 const LAPTOP_IP = '10.90.218.88'; // Твой IP ноута
 const UDP_PORT = 5000;
 
 export default function MeshChatScreen() {
+  useKeepAwake();
   const [myServiceName] = useState(`User-${Math.floor(Math.random() * 1000)}`);
   const [devices, setDevices] = useState<any[]>([]);
   const [remoteStream, setRemoteStream] = useState<any>(null);
@@ -34,6 +35,7 @@ export default function MeshChatScreen() {
   const activeUdpRef = useRef(false);
 
   useEffect(() => {
+    requestMicPermissions()
     // 1. Инициализация UDP сокета для трансляции на ноут
     const s = dgram.createSocket({ type: 'udp4' });
     s.bind();
@@ -44,7 +46,7 @@ export default function MeshChatScreen() {
       sampleRate: 44100,
       channels: 1,
       bitsPerSample: 16,
-      audioSource: 1,
+      audioSource: 6,
       bufferSize: 4096,
       wavFile: ""
     });
@@ -71,7 +73,21 @@ export default function MeshChatScreen() {
       stopAll();
     };
   }, []);
-
+  const requestMicPermissions = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        const granted = await PermissionsAndroid.requestMultiple([
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+        ]);
+        return granted['android.permission.RECORD_AUDIO'] === 'granted';
+      } catch (err) {
+        return false;
+      }
+    }
+    return true;
+  };
   const setupTcpServer = () => {
     server.current = TcpSocket.createServer((socket) => {
       socket.on('data', async (data) => {
@@ -93,7 +109,6 @@ export default function MeshChatScreen() {
       });
     }).listen({ port: TCP_PORT, host: '0.0.0.0' });
   };
-
   const sendSignaling = (ip: string, data: any) => {
     try {
       const client = TcpSocket.createConnection({ port: TCP_PORT, host: ip }, () => {
@@ -102,9 +117,8 @@ export default function MeshChatScreen() {
       client.on('error', (err) => console.log("TCP Signal Err:", err.message));
     } catch (e) { console.log("Signaling Crash Prevented"); }
   };
-
-
   const setupPeer = async (remoteIp?: string) => {
+
     try {
       if (peerConn.current) peerConn.current.close();
       peerConn.current = new RTCPeerConnection({ iceServers: [] });
@@ -119,8 +133,16 @@ export default function MeshChatScreen() {
       pc.ontrack = (event: any) => {
         if (event.streams && event.streams[0]) {
           setRemoteStream(event.streams[0]);
-          InCallManager.start({ media: 'audio' });
-          InCallManager.setForceSpeakerphoneOn(true);
+          InCallManager.start({ media: 'audio', auto: true });
+          InCallManager.setKeepScreenOn(true);
+          // InCallManager.setForceSpeakerphoneOn(true); - для принудительного использования микро телефона
+          setTimeout(() => {
+            const icm = InCallManager as any;
+            if (icm.chooseAudioRoute) {
+              icm.chooseAudioRoute('BLUETOOTH');
+              console.log("Попытка переключиться на BLUETOOTH");
+            }
+          }, 2000);
         }
       };
 
@@ -152,11 +174,20 @@ export default function MeshChatScreen() {
   };
 
   const startCall = async (ip: string) => {
+    await activateKeepAwakeAsync();
+
+    InCallManager.start({ media: 'audio', auto: true });
+    InCallManager.setKeepScreenOn(true);
     await setupPeer(ip);
+
     const offer = await peerConn.current?.createOffer();
     await peerConn.current?.setLocalDescription(offer);
+
     sendSignaling(ip, { type: 'offer', offer, fromIp: '127.0.0.1' });
+
+    console.log("SESSION_ACTIVE: SYSTEM_LOCK_PREVENTED");
   };
+
 
   const handleOffer = async (offer: any, fromIp: string) => {
     if (peerConn.current?.signalingState === 'stable') {
