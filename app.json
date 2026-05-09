@@ -54,7 +54,9 @@
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_MICROPHONE",
         "WAKE_LOCK",
-        "SYSTEM_ALERT_WINDOW"
+        "SYSTEM_ALERT_WINDOW",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE_SPECIAL_USE"
       ]
     },
     "plugins": [
