@@ -53,7 +53,8 @@
         "CHANGE_WIFI_MULTICAST_STATE",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_MICROPHONE",
-        "WAKE_LOCK"
+        "WAKE_LOCK",
+        "SYSTEM_ALERT_WINDOW"
       ]
     },
     "plugins": [
