@@ -61,6 +61,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-font",
       [
         "@config-plugins/react-native-webrtc",
         {
@@ -69,7 +70,14 @@
           }
         }
       ],
-      "expo-font",
+      [
+        "react-native-background-actions",
+        {
+          "android": {
+            "foregroundServiceType": "microphone"
+          }
+        }
+      ],
       [
         "expo-build-properties",
         {
