@@ -8,12 +8,27 @@ import TcpSocket from 'react-native-tcp-socket';
 import dgram from 'react-native-udp';
 import { Buffer } from 'buffer';
 import LiveAudioStream from 'react-native-live-audio-stream';
-import { activateKeepAwakeAsync, useKeepAwake } from 'expo-keep-awake';
+import { activateKeepAwakeAsync, useKeepAwake, deactivateKeepAwake } from 'expo-keep-awake';
+import BackgroundService from 'react-native-background-actions';
+
 const zeroconf = new Zeroconf();
 const TCP_PORT = 12345;
 const LAPTOP_IP = '10.90.218.88'; // Твой IP ноута
 const UDP_PORT = 5000;
-
+const sleep = (time: number) => new Promise((resolve) => setTimeout(resolve, time));
+const bgOptions = {
+  taskName: 'MeshVoiceTask',
+  taskTitle: 'MESH_VOICE: АКТИВЕН',
+  taskDesc: 'Передача голоса работает в фоне',
+  taskIcon: {
+    name: 'ic_launcher',
+    type: 'mipmap',
+  },
+  color: '#22d3ee',
+  parameters: {
+    delay: 1000,
+  },
+};
 export default function MeshChatScreen() {
   useKeepAwake();
   const [myServiceName] = useState(`User-${Math.floor(Math.random() * 1000)}`);
@@ -73,6 +88,16 @@ export default function MeshChatScreen() {
       stopAll();
     };
   }, []);
+  const voiceBackgroundTask = async (taskData: any) => {
+    await new Promise(async (resolve) => {
+      console.log("Background Service Started");
+      // Этот цикл держит JS-поток живым, пока сервис запущен
+      for (let i = 0; BackgroundService.isRunning(); i++) {
+        if (i % 10 === 0) console.log("System heartbeat...", i);
+        await sleep(taskData.delay);
+      }
+    });
+  };
   const requestMicPermissions = async () => {
     if (Platform.OS === 'android') {
       try {
@@ -165,30 +190,38 @@ export default function MeshChatScreen() {
       console.error("ОШИБКА ЗАХВАТА:", e.message);
     }
   };
-
   const processIceQueue = async () => {
     while (iceQueue.current.length > 0) {
       const cand = iceQueue.current.shift();
       await peerConn.current?.addIceCandidate(new RTCIceCandidate(cand)).catch(() => { });
     }
   };
-
   const startCall = async (ip: string) => {
-    await activateKeepAwakeAsync();
+    try {
+      // Блокируем сон процессора
+      await activateKeepAwakeAsync();
 
-    InCallManager.start({ media: 'audio', auto: true });
-    InCallManager.setKeepScreenOn(true);
-    await setupPeer(ip);
+      // ЗАПУСКАЕМ ФОНОВЫЙ СЕРВИС (Уведомление в шторке)
+      if (!BackgroundService.isRunning()) {
+        await BackgroundService.start(voiceBackgroundTask, bgOptions);
+      }
 
-    const offer = await peerConn.current?.createOffer();
-    await peerConn.current?.setLocalDescription(offer);
+      // Активируем аудио-режим
+      InCallManager.start({ media: 'audio', auto: true });
+      InCallManager.setKeepScreenOn(true);
 
-    sendSignaling(ip, { type: 'offer', offer, fromIp: '127.0.0.1' });
+      // Инициализируем WebRTC и UDP
+      await setupPeer(ip);
 
-    console.log("SESSION_ACTIVE: SYSTEM_LOCK_PREVENTED");
+      const offer = await peerConn.current?.createOffer();
+      await peerConn.current?.setLocalDescription(offer);
+      sendSignaling(ip, { type: 'offer', offer, fromIp: '127.0.0.1' });
+
+      console.log("FULL_SYSTEM_ACTIVE: Foreground + Loopback");
+    } catch (e) {
+      console.error("Failed to start background call:", e);
+    }
   };
-
-
   const handleOffer = async (offer: any, fromIp: string) => {
     if (peerConn.current?.signalingState === 'stable') {
       await setupPeer(fromIp);
@@ -199,23 +232,28 @@ export default function MeshChatScreen() {
     sendSignaling(fromIp, { type: 'answer', answer });
     processIceQueue();
   };
-
-  const stopAll = () => {
+  const stopAll = async () => {
     console.log("EMERGENCY_SHUTDOWN_INITIATED");
+
+    // Останавливаем фоновый сервис
+    await BackgroundService.stop();
+    // Разрешаем процессору засыпать
+    await deactivateKeepAwake();
+
     activeUdpRef.current = false;
     setIsUdpStreaming(false);
     LiveAudioStream.stop();
     zeroconf.stop();
+
     if (peerConn.current) {
       peerConn.current.close();
       peerConn.current = null;
     }
+
     InCallManager.stop();
     setRemoteStream(null);
-    console.log("SHUTDOWN_COMPLETE");
+    console.log("SHUTDOWN_COMPLETE: Service & Mic released");
   };
-
-
   return (
     <View className="flex-1 bg-slate-950 p-5">
       <Stack.Screen options={{ title: 'COMM_CENTER', headerShown: false }} />
