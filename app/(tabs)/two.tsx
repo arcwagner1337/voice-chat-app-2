@@ -28,6 +28,7 @@ const bgOptions = {
   parameters: {
     delay: 1000,
   },
+  linkingURI: 'voicechatapp://',
 };
 export default function MeshChatScreen() {
   useKeepAwake();
@@ -203,7 +204,11 @@ export default function MeshChatScreen() {
 
       // ЗАПУСКАЕМ ФОНОВЫЙ СЕРВИС (Уведомление в шторке)
       if (!BackgroundService.isRunning()) {
-        await BackgroundService.start(voiceBackgroundTask, bgOptions);
+        await BackgroundService.start(voiceBackgroundTask, {
+          ...bgOptions,
+          foregroundServiceType: ["microphone"]
+        });
+
       }
 
       // Активируем аудио-режим
