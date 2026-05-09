@@ -71,14 +71,6 @@
         }
       ],
       [
-        "react-native-background-actions",
-        {
-          "android": {
-            "foregroundServiceType": "microphone"
-          }
-        }
-      ],
-      [
         "expo-build-properties",
         {
           "android": {
@@ -87,6 +79,9 @@
             "buildToolsVersion": "35.0.0",
             "usesCleartextTraffic": true,
             "kotlinVersion": "2.0.21",
+            "foregroundServiceTypes": [
+              "microphone"
+            ],
             "foregroundService": {
               "notificationTitle": "MESH_VOICE_ACTIVE",
               "notificationContent": "Система передачи голоса активна в фоне",
