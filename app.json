@@ -77,10 +77,15 @@
             "usesCleartextTraffic": true,
             "kotlinVersion": "2.0.21",
             "foregroundService": {
-              "notificationTitle": "Mesh Voice Active",
-              "notificationContent": "Приложение работает в фоновом режиме",
+              "notificationTitle": "MESH_VOICE_ACTIVE",
+              "notificationContent": "Система передачи голоса активна в фоне",
               "icon": "./assets/icon.png"
-            }
+            },
+            "permissions": [
+              "FOREGROUND_SERVICE",
+              "FOREGROUND_SERVICE_MICROPHONE",
+              "WAKE_LOCK"
+            ]
           }
         }
       ]
