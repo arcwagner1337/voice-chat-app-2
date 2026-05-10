@@ -302,7 +302,7 @@ export default function MeshChatRoom() {
       ) : (
         /* В КОМНАТЕ */
         <View className="flex-1 justify-center items-center mt-6">
-          <Text className="text-green-500 text-2xl font-bold">{isHost ? roomName : 'В КОМНАТЕ'}</Text>
+          <Text className="text-green-500 text-2xl font-bold">{isHost ? 'Хост: ' + roomName : 'В КОМНАТЕ: ' + roomName}</Text>
           <Text className="text-cyan-400 font-medium mb-5">ПАРОЛЬ: {activePort.current}</Text>
 
           <FlatList
