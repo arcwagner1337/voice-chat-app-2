@@ -16,10 +16,11 @@
   "dependencies": {
     "@config-plugins/react-native-webrtc": "13.0.0",
     "@expo/vector-icons": "^15.0.2",
-    "@react-native-firebase/app": "^24.0.0",
+    "@react-native-async-storage/async-storage": "^3.0.2",
     "@react-native-firebase/firestore": "^24.0.0",
     "@react-native-google-signin/google-signin": "^16.1.2",
     "@react-navigation/native": "^7.1.6",
+    "@voximplant/react-native-foreground-service": "^3.0.2",
     "buffer": "^6.0.3",
     "expo": "^54.0.34",
     "expo-av": "~16.0.8",
@@ -34,6 +35,8 @@
     "expo-status-bar": "~3.0.9",
     "expo-system-ui": "~6.0.7",
     "expo-web-browser": "~15.0.7",
+    "express": "^5.2.1",
+    "firebase": "^12.13.0",
     "nativewind": "latest",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -51,7 +54,9 @@
     "react-native-web": "^0.21.0",
     "react-native-webrtc": "^124.0.7",
     "react-native-worklets": "0.5.1",
-    "react-native-zeroconf": "^0.14.0"
+    "react-native-zeroconf": "^0.14.0",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "122326983266",
+    "project_id": "voice-chat-app-4255d",
+    "storage_bucket": "voice-chat-app-4255d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:122326983266:android:98b9b2d5c7728d74b5673b",
+        "android_client_info": {
+          "package_name": "com.anonymous.voicechatapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCzdgcRKEdk-Xb4UhSkBKGeY9p_NUv1Qlg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
