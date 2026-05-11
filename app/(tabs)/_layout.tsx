@@ -10,7 +10,7 @@ export default function TabLayout() {
         // 1. Цвета активных и неактивных вкладок
         tabBarActiveTintColor: '#22d3ee',   // Cyan-400
         tabBarInactiveTintColor: '#475569', // Slate-500
-        
+
         // 2. Стиль самой панели
         tabBarStyle: {
           backgroundColor: '#020617',       // Slate-950 (как фон приложения)
@@ -29,7 +29,7 @@ export default function TabLayout() {
           fontSize: 14,
         },
       }}>
-      
+
       {/* ПЕРВАЯ ВКЛАДКА (Инфо) */}
       <Tabs.Screen
         name="index"
@@ -44,6 +44,13 @@ export default function TabLayout() {
         name="two"
         options={{
           title: 'COMM_CENTER',
+          tabBarIcon: ({ color }) => <FontAwesome5 name="broadcast-tower" size={18} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="three"
+        options={{
+          title: 'INTERNET CALL',
           tabBarIcon: ({ color }) => <FontAwesome5 name="broadcast-tower" size={18} color={color} />,
         }}
       />
