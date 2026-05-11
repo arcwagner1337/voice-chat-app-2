@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, FlatList, Alert, Platform, PermissionsAndroid, TextInput, ScrollView, KeyboardAvoidingView } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, Alert, Platform, PermissionsAndroid, TextInput, ScrollView, KeyboardAvoidingView, Keyboard, TouchableWithoutFeedback } from 'react-native';
 import Zeroconf from 'react-native-zeroconf';
 import InCallManager from 'react-native-incall-manager';
 import { mediaDevices, RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCView } from 'react-native-webrtc';
@@ -17,14 +17,14 @@ export default function MeshChatRoom() {
   // Профиль
   const [userName, setUserName] = useState(`Пользователь-${Math.floor(Math.random() * 99)}`);
   const [myIp, setMyIp] = useState<string>('');
-  
+
   // Комната
   const [roomName, setRoomName] = useState(`Комната-${Math.floor(Math.random() * 99)}`);
   const [roomPort, setRoomPort] = useState('12345');
   const [myServiceName] = useState(`User-${Math.floor(Math.random() * 9999)}`);
   const [isHost, setIsHost] = useState(false);
   const [inRoom, setInRoom] = useState(false);
-  
+
   // Состояния данных
   const [availableRooms, setAvailableRooms] = useState<any[]>([]);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
@@ -131,9 +131,9 @@ export default function MeshChatRoom() {
   const getOrCreatePeer = (remoteIp: string) => {
     if (peers.current[remoteIp]) return peers.current[remoteIp];
     const pc = new RTCPeerConnection({ iceServers: [] });
-    
+
     (pc as any).onicecandidate = (e: any) => e.candidate && sendSignaling(remoteIp, { type: 'ice', candidate: e.candidate }, activePort.current);
-    
+
     (pc as any).ontrack = (e: any) => {
       if (e.streams && e.streams[0]) {
         remoteStreams.current[remoteIp] = e.streams[0];
@@ -154,7 +154,7 @@ export default function MeshChatRoom() {
           const msg = JSON.parse(data.toString());
           if (msg.type === 'room_closed') { Alert.alert("Внимание", "Хост удалил комнату"); return stopAll(); }
           if (msg.type === 'bye') return closePeer(msg.fromIp);
-          
+
           if (msg.type === 'mute_status') {
             setRemoteMutes(prev => ({ ...prev, [msg.fromIp]: msg.value }));
             return;
@@ -230,85 +230,168 @@ export default function MeshChatRoom() {
       ip, name: peerNames.current[ip] || 'Участник', isMe: false, muted: !!remoteMutes[ip]
     }))
   ];
-
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1 bg-slate-950 p-5">
+    <View className="flex-1 bg-slate-950">
       <Stack.Screen options={{ headerShown: false }} />
-      {!inRoom ? (
-        <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
-          <View className="mt-10 p-4 bg-slate-900 rounded-2xl border border-slate-800">
-            <Text className="text-slate-500 text-[10px] mb-1 font-bold">ВАШ ПРОФИЛЬ</Text>
-            <TextInput className="text-white font-bold text-lg border-b border-slate-800 pb-1" value={userName} onChangeText={setUserName} />
-            <View className="flex-row mt-2"><Text className="text-slate-500 text-xs">IP: </Text><TextInput value={myIp} onChangeText={setMyIp} className="text-slate-400 text-xs flex-1" placeholder="192.168.1.X" placeholderTextColor="#333" /></View>
-          </View>
-          <View className="bg-slate-900 p-4 rounded-2xl mt-5 border border-slate-800">
-            <TextInput placeholder="Имя комнаты" placeholderTextColor="#475569" className="text-white border-b border-slate-800 mb-2 p-1" value={roomName} onChangeText={setRoomName} />
-            <TextInput placeholder="Пароль" placeholderTextColor="#475569" keyboardType="numeric" className="text-white p-1" value={roomPort} onChangeText={setRoomPort} />
-            <TouchableOpacity onPress={createRoom} className="bg-cyan-600 p-4 rounded-xl mt-2"><Text className="text-white text-center font-bold uppercase">Создать</Text></TouchableOpacity>
-          </View>
-          <FlatList scrollEnabled={false} data={availableRooms} keyExtractor={item => item.ip} renderItem={({ item }) => (
-            <View className={`bg-slate-900 p-4 mt-2 rounded-2xl border ${selectedRoom?.ip === item.ip ? 'border-cyan-600' : 'border-slate-800'}`}>
-              <TouchableOpacity onPress={() => { setSelectedRoom(item); setInputPass(''); }}>
-                <Text className="text-white font-bold">🏠 {item.name}</Text>
-                <Text className="text-slate-500 text-xs">Хост: {item.ip}</Text>
-              </TouchableOpacity>
-              {selectedRoom?.ip === item.ip && (
-                <View className="mt-3 border-t border-slate-800 pt-3">
-                  <TextInput placeholder="Пароль" placeholderTextColor="#475569" keyboardType="numeric" className="text-white bg-slate-950 p-2 rounded-lg mb-2" value={inputPass} onChangeText={setInputPass} />
-                  <TouchableOpacity onPress={() => joinRoom(item)} className="bg-green-500 p-3 rounded-lg"><Text className="text-white text-center font-bold">ВОЙТИ</Text></TouchableOpacity>
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 10}
+        className="flex-1"
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View className="flex-1 p-5">
+            {!inRoom ? (
+              <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
+                <View className="mt-10 p-4 bg-slate-900 rounded-2xl border border-slate-800">
+                  <Text className="text-slate-500 text-[10px] mb-1 font-bold uppercase">Ваш профиль</Text>
+                  <TextInput
+                    className="text-white font-bold text-lg border-b border-slate-800 pb-1"
+                    value={userName}
+                    onChangeText={setUserName}
+                  />
+                  <View className="flex-row mt-2">
+                    <Text className="text-slate-500 text-xs">IP: </Text>
+                    <TextInput
+                      value={myIp}
+                      onChangeText={setMyIp}
+                      className="text-slate-400 text-xs flex-1"
+                      placeholder="192.168.1.X"
+                      placeholderTextColor="#333"
+                    />
+                  </View>
                 </View>
-              )}
-            </View>
-          )} />
-        </ScrollView>
-      ) : (
-        <View className="flex-1 mt-6">
-          <View className="flex-row justify-between items-center mb-4">
-             <View><Text className="text-green-500 text-xl font-bold">{roomName}</Text><Text className="text-slate-500 text-xs">ПАРОЛЬ: {activePort.current}</Text></View>
-             <TouchableOpacity onPress={stopAll} className="bg-red-500/20 px-4 py-2 rounded-full border border-red-500/50"><Text className="text-red-500 font-bold text-xs uppercase">Выйти</Text></TouchableOpacity>
-          </View>
 
-          {/* УЧАСТНИКИ (С ПОДСВЕТКОЙ СЕБЯ) */}
-          <View className="h-24">
-            <FlatList horizontal showsHorizontalScrollIndicator={false} data={allParticipants} keyExtractor={item => item.ip} renderItem={({ item }) => (
-                <View className={`p-3 mr-2 bg-slate-900 rounded-2xl border ${item.isMe ? 'border-green-500' : 'border-slate-800'} items-center justify-center min-w-[100px]`}>
-                  <Text className="text-lg">{item.muted ? '🔇' : '🎤'}</Text>
-                  <Text className={`font-bold text-[10px] ${item.isMe ? 'text-green-500' : 'text-white'}`} numberOfLines={1}>{item.name}</Text>
-                  {item.isMe && <Text className="text-green-500 text-[8px] font-bold">ВЫ</Text>}
+                <View className="bg-slate-900 p-4 rounded-2xl mt-5 border border-slate-800">
+                  <TextInput
+                    placeholder="Имя комнаты"
+                    placeholderTextColor="#475569"
+                    className="text-white border-b border-slate-800 mb-2 p-1"
+                    value={roomName}
+                    onChangeText={setRoomName}
+                  />
+                  <TextInput
+                    placeholder="Пароль"
+                    placeholderTextColor="#475569"
+                    keyboardType="numeric"
+                    className="text-white p-1"
+                    value={roomPort}
+                    onChangeText={setRoomPort}
+                  />
+                  <TouchableOpacity onPress={createRoom} className="bg-cyan-600 p-4 rounded-xl mt-2">
+                    <Text className="text-white text-center font-bold uppercase">Создать</Text>
+                  </TouchableOpacity>
                 </View>
-            )} />
+
+                <FlatList
+                  scrollEnabled={false}
+                  data={availableRooms}
+                  keyExtractor={(item) => item.ip}
+                  renderItem={({ item }) => (
+                    <View className={`bg-slate-900 p-4 mt-2 rounded-2xl border ${selectedRoom?.ip === item.ip ? 'border-cyan-600' : 'border-slate-800'}`}>
+                      <TouchableOpacity onPress={() => { setSelectedRoom(item); setInputPass(''); }}>
+                        <Text className="text-white font-bold">🏠 {item.name}</Text>
+                        <Text className="text-slate-500 text-xs">Хост: {item.ip}</Text>
+                      </TouchableOpacity>
+                      {selectedRoom?.ip === item.ip && (
+                        <View className="mt-3 border-t border-slate-800 pt-3">
+                          <TextInput
+                            placeholder="Пароль"
+                            placeholderTextColor="#475569"
+                            keyboardType="numeric"
+                            className="text-white bg-slate-950 p-2 rounded-lg mb-2"
+                            value={inputPass}
+                            onChangeText={setInputPass}
+                          />
+                          <TouchableOpacity onPress={() => joinRoom(item)} className="bg-green-500 p-3 rounded-lg">
+                            <Text className="text-white text-center font-bold">ВОЙТИ</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </View>
+                  )}
+                />
+              </ScrollView>
+            ) : (
+              <View className="flex-1 mt-6">
+                <View className="flex-row justify-between items-center mb-4">
+                  <View>
+                    <Text className="text-green-500 text-xl font-bold">{roomName}</Text>
+                    <Text className="text-slate-500 text-xs uppercase font-bold">Порт: {activePort.current}</Text>
+                  </View>
+                  <TouchableOpacity onPress={stopAll} className="bg-red-500/20 px-4 py-2 rounded-full border border-red-500/50">
+                    <Text className="text-red-500 font-bold text-xs uppercase">Выйти</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View className="h-24">
+                  <FlatList
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    data={allParticipants}
+                    keyExtractor={(item) => item.ip}
+                    renderItem={({ item }) => (
+                      <View className={`p-3 mr-2 bg-slate-900 rounded-2xl border ${item.isMe ? 'border-green-500' : 'border-slate-800'} items-center justify-center min-w-[100px]`}>
+                        <Text className="text-lg">{item.muted ? '🔇' : '🎤'}</Text>
+                        <Text className={`font-bold text-[10px] ${item.isMe ? 'text-green-500' : 'text-white'}`} numberOfLines={1}>{item.name}</Text>
+                        {item.isMe && <Text className="text-green-500 text-[8px] font-bold">ВЫ</Text>}
+                      </View>
+                    )}
+                  />
+                </View>
+
+                <View className="flex-1 bg-slate-900/50 rounded-3xl my-4 border border-slate-800 p-4">
+                  <FlatList
+                    ref={flatListRef}
+                    onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
+                    data={chatMessages}
+                    keyExtractor={(item) => item.id}
+                    renderItem={({ item }) => (
+                      <View className={`mb-3 max-w-[80%] ${item.isMe ? 'self-end items-end' : 'self-start items-start'}`}>
+                        <Text className="text-slate-500 text-[8px] mb-1 font-bold">{item.sender}</Text>
+                        <View className={`p-3 rounded-2xl ${item.isMe ? 'bg-cyan-700' : 'bg-slate-800'}`}>
+                          <Text className="text-white text-sm">{item.text}</Text>
+                        </View>
+                      </View>
+                    )}
+                  />
+                </View>
+
+                <View className="flex-row items-end mb-4 gap-2">
+                  <TextInput
+                    multiline
+                    placeholder="Текст..."
+                    placeholderTextColor="#475569"
+                    className="flex-1 bg-slate-900 text-white p-4 py-3 rounded-2xl border border-slate-800 min-h-[56px] max-h-32"
+                    value={currentMsg}
+                    onChangeText={setCurrentMsg}
+                  />
+                  <TouchableOpacity onPress={sendChatMessage} className="bg-cyan-600 h-14 w-14 rounded-2xl items-center justify-center shadow-lg shadow-cyan-900/40">
+                    <Text className="text-white text-xl">🚀</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity
+                  onPress={toggleMute}
+                  className={`p-4 rounded-2xl w-full border ${isMuted ? 'bg-red-500/10 border-red-500/50' : 'bg-slate-800 border-slate-700'}`}
+                >
+                  <Text className={`text-center font-bold uppercase ${isMuted ? 'text-red-500' : 'text-white'}`}>
+                    {isMuted ? 'Микрофон выключен' : 'Микрофон включен'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
 
-          {/* ЧАТ */}
-          <View className="flex-1 bg-slate-900/50 rounded-3xl my-4 border border-slate-800 p-4">
-             <FlatList ref={flatListRef} onContentSizeChange={() => flatListRef.current?.scrollToEnd()} data={chatMessages} keyExtractor={item => item.id} renderItem={({ item }) => (
-                 <View className={`mb-3 max-w-[80%] ${item.isMe ? 'self-end items-end' : 'self-start items-start'}`}>
-                    <Text className="text-slate-500 text-[8px] mb-1">{item.sender}</Text>
-                    <View className={`p-3 rounded-2xl ${item.isMe ? 'bg-cyan-700' : 'bg-slate-800'}`}><Text className="text-white text-sm">{item.text}</Text></View>
-                 </View>
-             )} />
-          </View>
-
-          {/* ВВОД СООБЩЕНИЯ */}
-          <View className="flex-row items-center mb-4">
-             <TextInput placeholder="Текст..." placeholderTextColor="#475569" className="flex-1 bg-slate-900 text-white p-4 rounded-2xl border border-slate-800 mr-2" value={currentMsg} onChangeText={setCurrentMsg} />
-             <TouchableOpacity onPress={sendChatMessage} className="bg-cyan-600 h-14 w-14 rounded-2xl items-center justify-center"><Text className="text-white text-xl">🚀</Text></TouchableOpacity>
-          </View>
-
-          <TouchableOpacity onPress={toggleMute} className={`p-4 rounded-2xl w-full border ${isMuted ? 'bg-red-500/10 border-red-500/50' : 'bg-slate-800 border-slate-700'}`}>
-             <Text className={`text-center font-bold uppercase ${isMuted ? 'text-red-500' : 'text-white'}`}>{isMuted ? 'Микрофон выключен' : 'Микрофон включен'}</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* ЗВУКОВОЙ ДВИЖОК - ТВОЯ РАБОЧАЯ СХЕМА */}
-      <View className="absolute bottom-0 opacity-0 w-px h-px">
+      <View className="absolute bottom-0 opacity-0 w-px h-px pointer-events-none">
         {localStream.current && <RTCView streamURL={localStream.current.toURL()} style={{ width: 1, height: 1 }} />}
-        {Object.keys(remoteStreams.current).map(ip => {
-            const stream = remoteStreams.current[ip];
-            return stream?.toURL ? <RTCView key={ip} streamURL={stream.toURL()} style={{ width: 1, height: 1 }} /> : null;
+        {Object.keys(remoteStreams.current).map((ip) => {
+          const stream = remoteStreams.current[ip];
+          return stream?.toURL ? <RTCView key={ip} streamURL={stream.toURL()} style={{ width: 1, height: 1 }} /> : null;
         })}
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
