@@ -82,24 +82,28 @@ jobs:
           find node_modules -name "build.gradle" -exec sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 35/g' {} +
           find node_modules -name "build.gradle" -exec sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 35/g' {} +
           find node_modules -name "build.gradle" -exec sed -i 's/buildToolsVersion "[0-9.]*"/buildToolsVersion "35.0.0"/g' {} +
-
+      - name: 🐘 Cache Gradle
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
       - name: 🚀 Build with EAS
-
         run: |
-          # 1. Глобальный конфиг Gradle
+          # Включаем кэширование самого Gradle
           mkdir -p ~/.gradle
+          echo "org.gradle.caching=true" >> ~/.gradle/gradle.properties
+          echo "org.gradle.parallel=true" >> ~/.gradle/gradle.properties
           echo "kotlin.plugin.suppressKotlinVersionCompatibilityCheck=true" >> ~/.gradle/gradle.properties
-
-          # ЗАМЕНЯЕМ СТАРЫЙ ФЛАГ НА ЭТОТ:
           echo "android.useFullClasspathForDexingTransform=true" >> ~/.gradle/gradle.properties
-          
-          # Удаление папки андроид
-          rm -rf android
-          
-          # 2. Обязательно убедись, что нет ручного создания папки android/
-          npx expo prebuild --platform android --no-install
 
-          # 3. Запуск сборки
+          # Вместо удаления всей папки, делаем чистый пребилд
+          npx expo prebuild --platform android --clean --no-install
+
+          # Запуск сборки локально
           eas build --platform android --local --profile ${{ github.event.inputs.profile }} --non-interactive
 
         env:
@@ -112,29 +116,6 @@ jobs:
           # 4. Прокидываем флаг как системную переменную проекта (System Property)
           ORG_GRADLE_PROJECT_kotlin.plugin.suppressKotlinVersionCompatibilityCheck: "true"
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.console=plain"
-      # - name: 📱 Generate QR for APK
-      #   if: ${{ github.event.inputs.platform == 'android' }}
-      #   run: |
-      #     # 1. Находим путь к APK (EAS обычно кладет его глубоко в папки)
-      #     APK_PATH=$(find . -name "*.apk" | head -n 1)
-
-      #     if [ -z "$APK_PATH" ]; then
-      #       echo "APK not found, skipping QR generation"
-      #       exit 0
-      #     fi
-
-      #     # 2. Загружаем на временный хостинг (ссылка живет 14 дней)
-      #     DOWNLOAD_URL=$(curl --upload-file "$APK_PATH" https://transfer.sh)
-      #     echo "Download URL: $DOWNLOAD_URL"
-
-      #     # 3. Генерируем QR-код прямо в консоль (используем qrencode)
-      #     sudo apt-get update && sudo apt-get install -y qrencode
-      #     qrencode -t ANSI256 "$DOWNLOAD_URL"
-
-      #     # 4. Сохраняем ссылку в логах, чтобы не потерять
-      #     echo "##########################################################"
-      #     echo "СКАЧАТЬ APK МОЖНО ТУТ: $DOWNLOAD_URL"
-      #     echo "##########################################################"
 
       - name: 📁 Upload Artifacts
         uses: actions/upload-artifact@v4
