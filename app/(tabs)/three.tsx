@@ -179,12 +179,11 @@ export default function InternetChatRoom() {
 				android: {
 					channelId,
 					asForegroundService: true,
-					// На Android 14+ тип микрофона (MICROPHONE) — это 128
-					foregroundServiceTypes: [128 as any],
 					color: '#4caf50',
 					pressAction: { id: 'default' },
 				},
 			});
+
 
 
 
