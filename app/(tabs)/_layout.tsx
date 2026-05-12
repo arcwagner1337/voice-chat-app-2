@@ -2,7 +2,22 @@ import React from 'react';
 import { Tabs } from 'expo-router';
 import { View } from 'react-native';
 import { FontAwesome5 } from '@expo/vector-icons'; // Популярные иконки
+import notifee, { EventType } from '@notifee/react-native';
 
+notifee.onBackgroundEvent(async ({ type, detail }) => {
+  const { notification, pressAction } = detail;
+
+  console.log('Background event received:', type);
+
+  if (type === EventType.ACTION_PRESS && pressAction?.id === 'stop-call') {
+
+    if (notification?.id) {
+      await notifee.cancelNotification(notification.id);
+    }
+
+    console.log('Чат остановлен из фона');
+  }
+});
 export default function TabLayout() {
   return (
     <Tabs

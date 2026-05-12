@@ -49,13 +49,16 @@
         "BLUETOOTH_CONNECT",
         "BLUETOOTH_SCAN",
         "NEARBY_WIFI_DEVICES",
+        "ACCESS_WIFI_STATE",
+        "FOREGROUND_SERVICE_PHONE_CALL",
         "CHANGE_WIFI_MULTICAST_STATE",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_MICROPHONE",
         "WAKE_LOCK",
         "SYSTEM_ALERT_WINDOW",
         "ACCESS_BACKGROUND_LOCATION",
-        "FOREGROUND_SERVICE_SPECIAL_USE"
+        "FOREGROUND_SERVICE_SPECIAL_USE",
+        "FOREGROUND_SERVICE_SYSTEM_EXEMPTED"
       ]
     },
     "plugins": [
@@ -74,7 +77,11 @@
         {
           "android": {
             "compileSdkVersion": 35,
-            "foregroundServiceType": "microphone" ,
+            "foregroundServiceType": [
+              "microphone",
+              "systemExempted",
+              "phoneCall"
+            ],
             "targetSdkVersion": 35,
             "buildToolsVersion": "35.0.0",
             "kotlinVersion": "2.1.0",

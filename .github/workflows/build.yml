@@ -96,6 +96,12 @@ jobs:
           # Ждем, пока prebuild создаст файлы, либо делаем это до сборки
           # Мы добавим инструкцию для sed, чтобы поправить манифест после генерации
           echo "Патчим манифест..."
+      - name: 🛠 Force Patch Notifee Service
+        run: |
+          MANIFEST_PATH="./android/app/src/main/AndroidManifest.xml"
+          # Вставляем описание сервиса перед закрывающим тегом </application>
+          sed -i '/<\/application>/i \    <service android:name="app.notifee.core.ForegroundService" android:foregroundServiceType="microphone" />' $MANIFEST_PATH
+          echo "Патч манифеста завершен."
 
       - name: 🚀 Build with EAS
         run: |

@@ -20,11 +20,8 @@ import { mediaDevices, RTCPeerConnection, RTCSessionDescription, RTCIceCandidate
 import { useKeepAwake } from 'expo-keep-awake';
 import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import notifee, {
-	AndroidImportance,
-	AndroidForegroundServiceType
-} from '@notifee/react-native';
-// ТВОИ КОНСТАНТЫ
+import notifee, { AndroidImportance, AndroidCategory } from '@notifee/react-native';
+
 const SERVER_URL = "http://192.168.1.46:3000";
 const RECENT_ROOMS_KEY = "@recent_rooms_list";
 const USER_NAME_KEY = "@user_custom_name";
@@ -36,9 +33,9 @@ const configuration = {
 	]
 };
 
-
 export default function InternetChatRoom() {
 	useKeepAwake();
+	const activeInterval = useRef<any>(null);
 
 	const [userName, setUserName] = useState('');
 	const [roomID, setRoomID] = useState('');
@@ -60,6 +57,7 @@ export default function InternetChatRoom() {
 	const peerNames = useRef<{ [key: string]: string }>({});
 	const localStream = useRef<any>(null);
 	const flatListRef = useRef<any>(null);
+	const micInterval = useRef<any>(null); // ФИКС: Храним интервал
 
 	useEffect(() => {
 		setupAll();
@@ -72,7 +70,22 @@ export default function InternetChatRoom() {
 		if (userName) AsyncStorage.setItem(USER_NAME_KEY, userName).catch(() => { });
 	}, [userName]);
 
+	const checkBattery = async () => {
+		const batteryOptimizationEnabled = await notifee.isBatteryOptimizationEnabled();
+		if (batteryOptimizationEnabled) {
+			Alert.alert(
+				'Внимание',
+				'Для работы рации в фоновом режиме нужно отключить оптимизацию батареи для этого приложения',
+				[
+					{ text: 'Открыть настройки', onPress: () => notifee.openBatteryOptimizationSettings() },
+					{ text: 'Отмена', style: 'cancel' },
+				]
+			);
+		}
+	};
+
 	const setupAll = async () => {
+		await checkBattery(); // ФИКС: Проверка батареи при старте
 		await initApp();
 		await loadPersistentData();
 	};
@@ -85,8 +98,23 @@ export default function InternetChatRoom() {
 			]);
 		}
 		try {
-			const stream = await mediaDevices.getUserMedia({ audio: true, video: false });
+			const stream = await mediaDevices.getUserMedia({
+				audio: {
+					echoCancellation: true,
+					noiseSuppression: true,
+					autoGainControl: true,
+					// Добавляем эти параметры, они помогают системе понять тип трафика
+					googEchoCancellation: true,
+					googAutoGainControl: true,
+					googNoiseSuppression: true,
+					googHighpassFilter: true,
+				} as any,
+				video: false
+			});
 			localStream.current = stream;
+			// ФИКС: Явно включаем трек
+			localStream.current.getAudioTracks().forEach((t: any) => t.enabled = true);
+
 			const devices: any = await mediaDevices.enumerateDevices();
 			setAvailableMics(devices.filter((d: any) => d.kind === 'audioinput'));
 			InCallManager.start({ media: 'audio' });
@@ -162,35 +190,80 @@ export default function InternetChatRoom() {
 		saveRoomToRecent(target);
 		connectToSocket(target);
 
-		// --- ВМЕСТО CALLKEEP ИСПОЛЬЗУЕМ NOTIFEE ---
 		try {
-			// 1. Создаем канал для уведомлений (нужно для Android)
+			const stream = await mediaDevices.getUserMedia({
+				audio: {
+					echoCancellation: false, // Отключаем, чтобы не гасил фоновый шум
+					noiseSuppression: false,
+					autoGainControl: false,
+					// Эти параметры заставляют поток идти постоянно
+				} as any,
+				video: false
+			});
+			localStream.current = stream;
+			InCallManager.stop();
+			InCallManager.start({ media: 'audio', ringback: '' });
+			InCallManager.setKeepScreenOn(true);
+			InCallManager.setForceSpeakerphoneOn(true);
+			InCallManager.setSpeakerphoneOn(true);
+			InCallManager.setMicrophoneMute(false);
+			InCallManager.stopProximitySensor();
+
+			const settings = await notifee.requestPermission();
+			if (settings.authorizationStatus === 0) {
+				return Alert.alert("Ошибка", "Разрешите уведомления.");
+			}
 			const channelId = await notifee.createChannel({
 				id: 'incoming-calls',
 				name: 'Голосовой чат',
 				importance: AndroidImportance.HIGH,
 				sound: 'default',
 			});
-
-			// 2. Отображаем уведомление
 			await notifee.displayNotification({
-				title: 'Голосовой чат',
+				title: 'Рация активна',
 				body: `Вы в комнате: ${target}`,
 				android: {
-					channelId,
-					asForegroundService: true,
-					color: '#4caf50',
+					channelId: 'incoming-calls',
+					asForegroundService: true, // Этого достаточно, если в манифесте есть патч
+					category: AndroidCategory.CALL,
+					importance: AndroidImportance.HIGH,
+					ongoing: true,
 					pressAction: { id: 'default' },
 				},
 			});
+			if (activeInterval.current) clearInterval(activeInterval.current);
 
+			// Создаем ОДИН "двигатель" для всего приложения
+			activeInterval.current = setInterval(() => {
+				// 1. Пинг сокета
+				if (socket.current?.connected) {
+					socket.current.emit('ping');
+				}
 
+				// 2. Оживление микрофона (фикс для сна Android)
+				if (localStream.current) {
+					localStream.current.getAudioTracks().forEach((track: any) => {
+						// Переключаем, чтобы заставить Android отдавать данные
+						track.enabled = false;
+						track.enabled = true;
+					});
+				}
 
+				// 3. Поддержание громкой связи
+				if (isSpeaker) {
+					InCallManager.setSpeakerphoneOn(true);
+				}
 
+				// 4. Пинг WebRTC через DataChannel (перебираем всех пиров)
+				Object.values(peers.current).forEach((pc: any) => {
+					// Если ты создавал dc в getOrCreatePeer, можно слать тут
+					// Но даже первых трех пунктов хватит, чтобы система не спала
+				});
+
+			}, 3000);
 		} catch (e) {
-			console.log("Notifee Display Error", e);
+			console.error("Notifee Fatal Error:", e);
 		}
-
 		setInRoom(true);
 		updateUI();
 	};
@@ -210,11 +283,19 @@ export default function InternetChatRoom() {
 		let pc;
 		try { pc = new RTCPeerConnection(configuration); } catch (err) { pc = new RTCPeerConnection({ iceServers: [] }); }
 		const pcAny = pc as any;
+		const dc = pc.createDataChannel("keepalive");
 		pcAny.onicecandidate = (e: any) => { if (e.candidate) socket.current.emit("signal", remoteId, { type: "ice", candidate: e.candidate }); };
-		pcAny.ontrack = (e: any) => { if (e.streams && e.streams) { remoteStreams.current[remoteId] = e.streams; updateUI(); } };
+		pcAny.ontrack = (e: any) => { if (e.streams) { remoteStreams.current[remoteId] = e.streams; updateUI(); } };
 		if (localStream.current) localStream.current.getTracks().forEach((t: any) => pc.addTrack(t, localStream.current));
 		peers.current[remoteId] = pc;
+		setInterval(() => {
+			if (dc.readyState === 'open') {
+				dc.send("keep-alive");
+			}
+		}, 2000);
+
 		return pc;
+
 	};
 
 	const sendChatMessage = () => {
@@ -234,6 +315,7 @@ export default function InternetChatRoom() {
 	const toggleSpeaker = () => {
 		const newState = !isSpeaker;
 		InCallManager.setForceSpeakerphoneOn(newState);
+		InCallManager.setSpeakerphoneOn(newState); // ФИКС
 		setIsSpeaker(newState);
 	};
 
@@ -247,15 +329,17 @@ export default function InternetChatRoom() {
 				const sender = pc.getSenders().find((s: any) => s.track?.kind === 'audio');
 				if (sender) sender.replaceTrack(newTrack);
 			});
+			localStream.current = newStream; // ФИКС: Обновляем локальную ссылку
 			setCurrentMicIdx(nextIdx);
 		} catch (e) { }
 	};
 
 	const stopAll = async () => {
+		if (micInterval.current) clearInterval(micInterval.current); // ФИКС: Чистим интервал
 		if (socket.current) socket.current.disconnect();
 		Object.values(peers.current).forEach(p => p.close());
 
-		// Убираем уведомление чата
+		await notifee.stopForegroundService(); // ФИКС: Грохаем сервис
 		await notifee.cancelAllNotifications();
 
 		peers.current = {};
@@ -393,7 +477,7 @@ export default function InternetChatRoom() {
 				{localStream.current && <RTCView streamURL={localStream.current.toURL()} style={{ width: 1, height: 1 }} />}
 				{Object.keys(remoteStreams.current).map(id => {
 					const s = remoteStreams.current[id];
-					return (s && typeof s.toURL === 'function') ? <RTCView key={id} streamURL={s.toURL()} style={{ width: 1, height: 1 }} /> : null;
+					return (s && s[0] && typeof s[0].toURL === 'function') ? <RTCView key={id} streamURL={s[0].toURL()} style={{ width: 1, height: 1 }} /> : null;
 				})}
 			</View>
 		</View>
