@@ -12,14 +12,17 @@ import {
 	ScrollView,
 	Keyboard,
 	TouchableWithoutFeedback,
-	KeyboardAvoidingView
+	KeyboardAvoidingView,
+	NativeModules
 } from 'react-native';
 import InCallManager from 'react-native-incall-manager';
 import { mediaDevices, RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCView } from 'react-native-webrtc';
 import { useKeepAwake } from 'expo-keep-awake';
 import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import notifee, { AndroidImportance, AndroidCategory, AndroidLaunchActivityFlag } from '@notifee/react-native';
 
+// ТВОИ КОНСТАНТЫ
 const SERVER_URL = "http://192.168.1.46:3000";
 const RECENT_ROOMS_KEY = "@recent_rooms_list";
 const USER_NAME_KEY = "@user_custom_name";
@@ -30,6 +33,15 @@ const configuration = {
 		{ urls: 'stun:://google.com' }
 	]
 };
+let RNCallKeep: any = null;
+if (Platform.OS !== 'web') {
+	try {
+		RNCallKeep = require('react-native-callkeep').default;
+	} catch (e) {
+		console.warn("CallKeep не завелся");
+	}
+}
+
 
 export default function InternetChatRoom() {
 	useKeepAwake();
@@ -56,20 +68,57 @@ export default function InternetChatRoom() {
 	const flatListRef = useRef<any>(null);
 
 	useEffect(() => {
-		initApp();
-		loadPersistentData();
-		return () => stopAll();
+		setupAll();
+		return () => {
+			stopAll();
+		};
 	}, []);
 
 	useEffect(() => {
 		if (userName) AsyncStorage.setItem(USER_NAME_KEY, userName).catch(() => { });
 	}, [userName]);
 
+	const setupAll = async () => {
+		await initApp();
+		await loadPersistentData();
+
+		// БЕЗОПАСНАЯ НАСТРОЙКА CALLKEEP
+		if (RNCallKeep) {
+			try {
+				await RNCallKeep.setup({
+					ios: {
+						appName: 'My App Name', // Required: Displayed on system UI
+						imageName: 'phone_account_icon', // Optional
+						ringtoneSound: 'ringtone.caf', // Optional
+					},
+					android: {
+						alertTitle: 'Permissions required',
+						alertDescription: 'This app needs access to your phone accounts',
+						cancelButton: 'Cancel',
+						okButton: 'ok',
+						imageName: 'phone_account_icon',
+						// Android 11+ requirements
+						foregroundService: {
+							channelId: 'com.company.my',
+							channelName: 'Foreground Service',
+							notificationTitle: 'My app is running on background',
+							notificationIcon: 'Path to the icon',
+						},
+						additionalPermissions: []
+					}
+				});
+				console.log("CallKeep Ready");
+			} catch (e) {
+				console.log("CallKeep Setup Internal Error", e);
+			}
+		}
+	};
+
 	const initApp = async () => {
 		if (Platform.OS === 'android') {
 			await PermissionsAndroid.requestMultiple([
 				PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-				// PermissionsAndroid.PERMISSIONS.MODIFY_AUDIO_SETTINGS
+				PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
 			]);
 		}
 		try {
@@ -142,15 +191,54 @@ export default function InternetChatRoom() {
 		socket.current.emit("join-room", targetRoom, userName);
 	};
 
-	const joinRoom = (id?: string) => {
+	const joinRoom = async (id?: string) => {
 		const target = id || roomID;
 		if (!target) return Alert.alert("Ошибка", "Введите название");
+
 		setRoomID(target);
 		saveRoomToRecent(target);
 		connectToSocket(target);
+
+		// --- ВМЕСТО CALLKEEP ИСПОЛЬЗУЕМ NOTIFEE ---
+		try {
+			// 1. Создаем канал для уведомлений (нужно для Android)
+			const channelId = await notifee.createChannel({
+				id: 'incoming-calls',
+				name: 'Голосовой чат',
+				importance: AndroidImportance.HIGH,
+				sound: 'default',
+			});
+
+			// 2. Отображаем уведомление
+			await notifee.displayNotification({
+				title: `Вход в комнату: ${target}`,
+				body: 'Вы подключены к голосовому чату',
+				android: {
+					channelId,
+					// category: AndroidCategory.CALL, // Помечает для системы как звонок
+					importance: AndroidImportance.HIGH,
+					ongoing: true, // Нельзя смахнуть пальцем, пока в комнате
+					asForegroundService: true, // Делает уведомление "живучим" в фоне
+					pressAction: {
+						id: 'default',
+						launchActivity: 'default',
+					},
+					actions: [
+						{
+							title: '<Text style="color: #ff0000">Покинуть чат</Text>',
+							pressAction: { id: 'stop-call' },
+						},
+					],
+				},
+			});
+		} catch (e) {
+			console.log("Notifee Display Error", e);
+		}
+
 		setInRoom(true);
 		updateUI();
 	};
+
 
 	const initiateCall = async (remoteId: string) => {
 		try {
@@ -207,10 +295,16 @@ export default function InternetChatRoom() {
 		} catch (e) { }
 	};
 
-	const stopAll = () => {
-		socket.current?.disconnect();
+	const stopAll = async () => {
+		if (socket.current) socket.current.disconnect();
 		Object.values(peers.current).forEach(p => p.close());
-		peers.current = {}; remoteStreams.current = {}; setInRoom(false);
+
+		// Убираем уведомление чата
+		await notifee.cancelAllNotifications();
+
+		peers.current = {};
+		remoteStreams.current = {};
+		setInRoom(false);
 		InCallManager.stop();
 	};
 
@@ -219,10 +313,8 @@ export default function InternetChatRoom() {
 			<Stack.Screen options={{ headerShown: false }} />
 
 			<KeyboardAvoidingView
-				// padding обычно самый стабильный
 				behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-				// Если нет отступа, попробуй менять это значение (90-100 часто фиксит проблему в Expo)
-				keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 10}
+				keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 5}
 				className="flex-1"
 			>
 				<TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -276,7 +368,7 @@ export default function InternetChatRoom() {
 								<View className="flex-row justify-between items-center mb-4 px-1">
 									<View>
 										<Text className="text-green-500 text-2xl font-black"># {roomID}</Text>
-										<Text className="text-slate-500 text-[10px] uppercase font-bold text-cyan-400">Online Active</Text>
+										<Text className="text-[10px] uppercase font-bold text-cyan-400">Online Active</Text>
 									</View>
 									<TouchableOpacity onPress={stopAll} className="bg-red-500/10 px-6 py-2 rounded-full border border-red-500/30">
 										<Text className="text-red-500 font-bold text-[10px] uppercase">Выход</Text>
@@ -292,23 +384,22 @@ export default function InternetChatRoom() {
 									)} />
 								</View>
 
-								{/* Список сообщений */}
-								<FlatList
-									ref={flatListRef}
-									onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
-									data={chatMessages}
-									className="flex-1 bg-slate-900/50 rounded-3xl border border-slate-800 p-4 mb-4"
-									renderItem={({ item }) => (
-										<View className={`mb-3 ${item.isMe ? 'items-end' : 'items-start'}`}>
-											<Text className="text-slate-500 text-[8px] mb-1 font-bold uppercase">{item.sender}</Text>
-											<View className={`p-3 rounded-2xl ${item.isMe ? 'bg-cyan-700 rounded-tr-none' : 'bg-slate-800 rounded-tl-none'}`}>
-												<Text className="text-white text-sm">{item.text}</Text>
+								<View className="flex-1 bg-slate-900/50 rounded-3xl border border-slate-800 p-4 mb-4">
+									<FlatList
+										ref={flatListRef}
+										onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
+										data={chatMessages}
+										renderItem={({ item }) => (
+											<View className={`mb-3 ${item.isMe ? 'items-end' : 'items-start'}`}>
+												<Text className="text-slate-500 text-[8px] mb-1 font-bold uppercase">{item.sender}</Text>
+												<View className={`p-3 rounded-2xl ${item.isMe ? 'bg-cyan-700 rounded-tr-none' : 'bg-slate-800 rounded-tl-none'}`}>
+													<Text className="text-white text-sm">{item.text}</Text>
+												</View>
 											</View>
-										</View>
-									)}
-								/>
+										)}
+									/>
+								</View>
 
-								{/* Блок ввода */}
 								<View className="flex-row items-end mb-4 gap-2">
 									<TextInput
 										multiline
@@ -323,7 +414,6 @@ export default function InternetChatRoom() {
 									</TouchableOpacity>
 								</View>
 
-								{/* Кнопки железа */}
 								<View className="flex-row items-center gap-3">
 									<TouchableOpacity
 										onPress={toggleMute}
@@ -343,7 +433,6 @@ export default function InternetChatRoom() {
 				</TouchableWithoutFeedback>
 			</KeyboardAvoidingView>
 
-			{/* Звуковые потоки */}
 			<View className="absolute opacity-0 pointer-events-none">
 				{localStream.current && <RTCView streamURL={localStream.current.toURL()} style={{ width: 1, height: 1 }} />}
 				{Object.keys(remoteStreams.current).map(id => {
