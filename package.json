@@ -79,7 +79,6 @@
           "react-native-tcp-socket",
           "react-native-background-actions",
           "react-native-network-info",
-          "@voximplant/react-native-foreground-service",
           "react-native-live-audio-stream"
         ]
       }
