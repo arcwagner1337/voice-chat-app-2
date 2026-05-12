@@ -77,6 +77,11 @@ jobs:
         if: ${{ github.event.inputs.platform == 'android' }}
         run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode >
           ./release.jks
+      - name: Force SDK versions
+        run: |
+          find node_modules -name "build.gradle" -exec sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 35/g' {} +
+          find node_modules -name "build.gradle" -exec sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 35/g' {} +
+          find node_modules -name "build.gradle" -exec sed -i 's/buildToolsVersion "[0-9.]*"/buildToolsVersion "35.0.0"/g' {} +
 
       - name: 🚀 Build with EAS
 
@@ -87,7 +92,7 @@ jobs:
 
           # ЗАМЕНЯЕМ СТАРЫЙ ФЛАГ НА ЭТОТ:
           echo "android.useFullClasspathForDexingTransform=true" >> ~/.gradle/gradle.properties
-      
+
           # 2. Обязательно убедись, что нет ручного создания папки android/
           npx expo prebuild --platform android --no-install
 

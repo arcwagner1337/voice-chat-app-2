@@ -72,11 +72,16 @@
   "expo": {
     "doctor": {
       "reactNativeDirectoryCheck": {
+        "listUnknownPackages": false,
         "exclude": [
           "react-native-incall-manager",
           "react-native-webrtc",
           "react-native-udp",
-          "react-native-tcp-socket"
+          "react-native-tcp-socket",
+          "react-native-background-actions",
+          "react-native-network-info",
+          "@voximplant/react-native-foreground-service",
+          "react-native-live-audio-stream"
         ]
       }
     }
