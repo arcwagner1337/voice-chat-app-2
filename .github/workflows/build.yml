@@ -92,7 +92,10 @@ jobs:
 
           # ЗАМЕНЯЕМ СТАРЫЙ ФЛАГ НА ЭТОТ:
           echo "android.useFullClasspathForDexingTransform=true" >> ~/.gradle/gradle.properties
-
+          
+          # Удаление папки андроид
+          rm -rf android
+          
           # 2. Обязательно убедись, что нет ручного создания папки android/
           npx expo prebuild --platform android --no-install
 
