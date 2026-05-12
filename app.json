@@ -78,7 +78,7 @@
             "targetSdkVersion": 35,
             "buildToolsVersion": "35.0.0",
             "usesCleartextTraffic": true,
-            "kotlinVersion": "2.0.21",
+            "kotlinVersion": "2.1.0",
             "foregroundServiceTypes": [
               "microphone"
             ],
