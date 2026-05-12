@@ -87,20 +87,7 @@
                   ]
                 }
               }
-            },
-            "foregroundServiceTypes": [
-              "microphone"
-            ],
-            "foregroundService": {
-              "notificationTitle": "MESH_VOICE_ACTIVE",
-              "notificationContent": "Система передачи голоса активна в фоне",
-              "icon": "./assets/icon.png"
-            },
-            "permissions": [
-              "FOREGROUND_SERVICE",
-              "FOREGROUND_SERVICE_MICROPHONE",
-              "WAKE_LOCK"
-            ]
+            }
           }
         }
       ]
