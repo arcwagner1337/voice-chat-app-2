@@ -20,8 +20,10 @@ import { mediaDevices, RTCPeerConnection, RTCSessionDescription, RTCIceCandidate
 import { useKeepAwake } from 'expo-keep-awake';
 import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import notifee, { AndroidImportance, AndroidCategory, AndroidLaunchActivityFlag } from '@notifee/react-native';
-
+import notifee, {
+	AndroidImportance,
+	AndroidForegroundServiceType
+} from '@notifee/react-native';
 // ТВОИ КОНСТАНТЫ
 const SERVER_URL = "http://192.168.1.46:3000";
 const RECENT_ROOMS_KEY = "@recent_rooms_list";
@@ -33,14 +35,6 @@ const configuration = {
 		{ urls: 'stun:://google.com' }
 	]
 };
-let RNCallKeep: any = null;
-if (Platform.OS !== 'web') {
-	try {
-		RNCallKeep = require('react-native-callkeep').default;
-	} catch (e) {
-		console.warn("CallKeep не завелся");
-	}
-}
 
 
 export default function InternetChatRoom() {
@@ -81,37 +75,6 @@ export default function InternetChatRoom() {
 	const setupAll = async () => {
 		await initApp();
 		await loadPersistentData();
-
-		// БЕЗОПАСНАЯ НАСТРОЙКА CALLKEEP
-		if (RNCallKeep) {
-			try {
-				await RNCallKeep.setup({
-					ios: {
-						appName: 'My App Name', // Required: Displayed on system UI
-						imageName: 'phone_account_icon', // Optional
-						ringtoneSound: 'ringtone.caf', // Optional
-					},
-					android: {
-						alertTitle: 'Permissions required',
-						alertDescription: 'This app needs access to your phone accounts',
-						cancelButton: 'Cancel',
-						okButton: 'ok',
-						imageName: 'phone_account_icon',
-						// Android 11+ requirements
-						foregroundService: {
-							channelId: 'com.company.my',
-							channelName: 'Foreground Service',
-							notificationTitle: 'My app is running on background',
-							notificationIcon: 'Path to the icon',
-						},
-						additionalPermissions: []
-					}
-				});
-				console.log("CallKeep Ready");
-			} catch (e) {
-				console.log("CallKeep Setup Internal Error", e);
-			}
-		}
 	};
 
 	const initApp = async () => {
@@ -211,26 +174,19 @@ export default function InternetChatRoom() {
 
 			// 2. Отображаем уведомление
 			await notifee.displayNotification({
-				title: `Вход в комнату: ${target}`,
-				body: 'Вы подключены к голосовому чату',
+				title: 'Голосовой чат',
+				body: `Вы в комнате: ${target}`,
 				android: {
 					channelId,
-					// category: AndroidCategory.CALL, // Помечает для системы как звонок
-					importance: AndroidImportance.HIGH,
-					ongoing: true, // Нельзя смахнуть пальцем, пока в комнате
-					asForegroundService: true, // Делает уведомление "живучим" в фоне
-					pressAction: {
-						id: 'default',
-						launchActivity: 'default',
-					},
-					actions: [
-						{
-							title: '<Text style="color: #ff0000">Покинуть чат</Text>',
-							pressAction: { id: 'stop-call' },
-						},
-					],
+					asForegroundService: true,
+					// Попробуй так:
+					foregroundServiceTypes: ['microphone'],
+					color: '#4caf50',
+					pressAction: { id: 'default' },
 				},
 			});
+
+
 		} catch (e) {
 			console.log("Notifee Display Error", e);
 		}
