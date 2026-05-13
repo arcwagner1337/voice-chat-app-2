@@ -12,14 +12,15 @@ import {
 	ScrollView,
 	Keyboard,
 	TouchableWithoutFeedback,
-	KeyboardAvoidingView
+	KeyboardAvoidingView,
+	AppState,
+	NativeModules,
 } from 'react-native';
 import InCallManager from 'react-native-incall-manager';
 import { mediaDevices, RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCView } from 'react-native-webrtc';
 import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import notifee, { AndroidImportance, AndroidCategory, AndroidColor, EventType } from '@notifee/react-native';
-import { AudioModule } from 'expo-audio';
 
 const SERVER_URL = "http://192.168.1.46:3000";
 const RECENT_ROOMS_KEY = "@recent_rooms_list";
@@ -28,15 +29,26 @@ const USER_NAME_KEY = "@user_custom_name";
 const configuration = {
 	iceServers: [
 		{ urls: 'stun:google.com' },
-		{ urls: 'stun:google.com' }
+		{ urls: 'stun:stun.l.google.com:19302' }
 	]
 };
-notifee.registerForegroundService(() => {
-	return new Promise(() => { });
+
+// ✅ Регистрация обработчика foreground service
+notifee.registerForegroundService((notification) => {
+	return new Promise<void>((resolve) => {
+		const unsubscribe = notifee.onForegroundEvent(({ type, detail }) => {
+			if (type === EventType.ACTION_PRESS && detail.pressAction?.id === 'stop-call') {
+				notifee.stopForegroundService();
+				unsubscribe();
+				resolve();
+			}
+		});
+	});
 });
 
 export default function InternetChatRoom() {
-	const activeInterval = useRef<any>(null);
+	const activeInterval = useRef<NodeJS.Timeout | null>(null);
+	const appStateRef = useRef(AppState.currentState);
 
 	const [userName, setUserName] = useState('');
 	const [roomID, setRoomID] = useState('');
@@ -61,12 +73,12 @@ export default function InternetChatRoom() {
 
 	const inRoomRef = useRef(false);
 	const roomIDRef = useRef('');
-	useEffect(() => {
-		inRoomRef.current = inRoom;
-	}, [inRoom]);
-	useEffect(() => {
-		roomIDRef.current = roomID;
-	}, [roomID]);
+	const userNameRef = useRef('');
+
+	useEffect(() => { inRoomRef.current = inRoom; }, [inRoom]);
+	useEffect(() => { roomIDRef.current = roomID; }, [roomID]);
+	useEffect(() => { userNameRef.current = userName; }, [userName]);
+
 	useEffect(() => {
 		setupAll();
 		const unsubscribe = notifee.onForegroundEvent(async ({ type, detail }) => {
@@ -75,48 +87,53 @@ export default function InternetChatRoom() {
 					await rebuildNotification(roomIDRef.current);
 				}
 			}
+			if (type === EventType.ACTION_PRESS && detail.pressAction?.id === 'stop-call') {
+				stopAll();
+			}
 		});
+
+		const appStateSubscription = AppState.addEventListener('change', async (nextState) => {
+			if (nextState === 'active' && inRoomRef.current) {
+				console.log("📱 App became active, restoring audio...");
+				// Небольшая задержка, чтобы ОС успела отдать ресурсы
+				setTimeout(() => {
+					restoreAudioSession();
+				}, 500);
+			}
+			appStateRef.current = nextState;
+		});
+
 		return () => {
 			unsubscribe();
+			appStateSubscription.remove();
 			stopAll();
 		};
 	}, []);
+
 	useEffect(() => {
 		if (userName) AsyncStorage.setItem(USER_NAME_KEY, userName).catch(() => { });
 	}, [userName]);
-	const checkBattery = async () => {
-		if (Platform.OS === 'android') {
-			const batteryOptimizationEnabled = await notifee.isBatteryOptimizationEnabled();
-			if (batteryOptimizationEnabled) {
-				Alert.alert(
-					'Внимание',
-					'Для работы рации в фоновом режиме нужно отключить оптимизацию батареи для этого приложения',
-					[
-						{ text: 'Открыть настройки', onPress: () => notifee.openBatteryOptimizationSettings() },
-						{ text: 'Отмена', style: 'cancel' },
-					]
-				);
-			}
-		}
-	};
+
 	const setupAll = async () => {
-		await checkBattery();
 		await initApp();
 		await loadPersistentData();
 	};
+
 	const initApp = async () => {
 		if (Platform.OS === 'android') {
-			await PermissionsAndroid.requestMultiple([
-				PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-				PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
-			]);
+			try {
+				const granted = await PermissionsAndroid.requestMultiple([
+					PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+					PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
+				]);
+				if (granted['android.permission.RECORD_AUDIO'] !== PermissionsAndroid.RESULTS.GRANTED) {
+					Alert.alert('Ошибка', 'Требуется доступ к микрофону');
+				}
+			} catch (e) {
+				console.log('Permission error:', e);
+			}
 		}
 		try {
-			await AudioModule.setAudioModeAsync({
-				allowsRecording: true,
-				playsInSilentMode: true,
-				shouldRouteThroughEarpiece: false,
-			});
 			const stream = await mediaDevices.getUserMedia({
 				audio: {
 					echoCancellation: true,
@@ -126,17 +143,93 @@ export default function InternetChatRoom() {
 					googAutoGainControl: true,
 					googNoiseSuppression: true,
 					googHighpassFilter: true,
+					sampleRate: 48000,
+					channelCount: 1,
 				} as any,
 				video: false
 			});
 			localStream.current = stream;
-			localStream.current.getAudioTracks().forEach((t: any) => t.enabled = true);
+			localStream.current.getAudioTracks().forEach((t: any) => {
+				t.enabled = true;
+				t.contentHint = 'speech';
+			});
 			const devices: any = await mediaDevices.enumerateDevices();
 			setAvailableMics(devices.filter((d: any) => d.kind === 'audioinput'));
-			InCallManager.start({ media: 'audio' });
+
+			InCallManager.start({ media: 'audio', auto: true });
 			InCallManager.setForceSpeakerphoneOn(true);
-		} catch (e) { console.log("Mic init error", e); }
+			InCallManager.setKeepScreenOn(true);
+		} catch (e) {
+			console.log("Mic init error", e);
+			Alert.alert('Ошибка', 'Не удалось инициализировать микрофон');
+		}
 	};
+
+	// ✅ ЖЕСТКОЕ ВОССТАНОВЛЕНИЕ АУДИО
+	const restoreAudioSession = async () => {
+		if (!inRoomRef.current || !localStream.current) return;
+		console.log("🔄 Restoring audio session...");
+
+		try {
+			// 1. ВСЕГДА перезапускаем InCallManager при возврате из фона.
+			// Это критично для перехвата аудио-фокуса у системы.
+			await InCallManager.start({ media: 'audio', auto: true });
+
+			// 2. Жестко задаем настройки звука
+			InCallManager.setForceSpeakerphoneOn(true); // Принудительно динамик
+			InCallManager.setSpeakerphoneOn(isSpeaker);
+			InCallManager.setMicrophoneMute(isMuted);
+			InCallManager.setKeepScreenOn(true);
+			InCallManager.stopProximitySensor(); // Отключаем датчик, чтобы не гасил экран/звук
+
+			// 3. Проверяем треки
+			const track = localStream.current.getAudioTracks()[0];
+			if (track) {
+				// Если трек отключен логически - включаем
+				if (!track.enabled) {
+					track.enabled = true;
+					console.log("✅ Track re-enabled");
+				}
+
+				// Если трек мертв физически - пересоздаем (редкий случай, но возможный)
+				if (track.readyState !== 'live') {
+					console.warn("⚠️ Track dead, recreating stream...");
+					localStream.current.getTracks().forEach((t: any) => t.stop());
+
+					const newStream = await mediaDevices.getUserMedia({
+						audio: {
+							echoCancellation: false,
+							noiseSuppression: false,
+							autoGainControl: false,
+							sampleRate: 48000,
+							channelCount: 1,
+						} as any,
+						video: false
+					});
+
+					localStream.current = newStream;
+					newStream.getAudioTracks().forEach((t: any) => t.enabled = true);
+
+					// Заменяем треки в WebRTC
+					Object.values(peers.current).forEach((pc: any) => {
+						const senders = pc.getSenders();
+						const newTrack = newStream.getAudioTracks()[0];
+						senders.forEach((sender: any) => {
+							if (sender.track?.kind === 'audio') {
+								sender.replaceTrack(newTrack).catch((err: any) => console.error("Replace error:", err));
+							}
+						});
+					});
+				}
+			}
+
+			console.log("✅ Audio session fully restored");
+
+		} catch (e) {
+			console.error("💀 Critical audio restore error:", e);
+		}
+	};
+
 	const loadPersistentData = async () => {
 		try {
 			const savedName = await AsyncStorage.getItem(USER_NAME_KEY);
@@ -145,20 +238,24 @@ export default function InternetChatRoom() {
 			if (savedRooms) setRecentRooms(JSON.parse(savedRooms));
 		} catch (e) { }
 	};
+
 	const saveRoomToRecent = async (id: string) => {
 		const updated = [id, ...recentRooms.filter(r => r !== id)].slice(0, 8);
 		setRecentRooms(updated);
 		await AsyncStorage.setItem(RECENT_ROOMS_KEY, JSON.stringify(updated));
 	};
+
 	const removeRoom = async (id: string) => {
 		const updated = recentRooms.filter(r => r !== id);
 		setRecentRooms(updated);
 		await AsyncStorage.setItem(RECENT_ROOMS_KEY, JSON.stringify(updated));
 	};
+
 	const updateUI = () => {
 		const list = Object.keys(remoteStreams.current).map(id => ({ id, name: peerNames.current[id] || 'Собеседник' }));
 		setParticipants([{ id: 'me', name: userName, isMe: true }, ...list]);
 	};
+
 	const connectToSocket = (targetRoom: string) => {
 		socket.current = io(SERVER_URL, { transports: ['websocket'], reconnection: true });
 		socket.current.on("chat-history", (h: any[]) => setChatMessages(h.map(m => ({ ...m, isMe: m.sender === userName }))));
@@ -186,12 +283,14 @@ export default function InternetChatRoom() {
 		socket.current.on("user-left", (id: string) => {
 			if (peers.current[id]) {
 				peers.current[id].close();
-				delete peers.current[id]; delete remoteStreams.current[id];
+				delete peers.current[id];
+				delete remoteStreams.current[id];
 				updateUI();
 			}
 		});
 		socket.current.emit("join-room", targetRoom, userName);
 	};
+
 	const rebuildNotification = async (target: string) => {
 		const channelId = await notifee.createChannel({
 			id: 'mesh-voice-intercom',
@@ -199,14 +298,15 @@ export default function InternetChatRoom() {
 			importance: AndroidImportance.HIGH,
 			sound: "default"
 		});
+
 		await notifee.displayNotification({
 			id: 'mesh-intercom-fgs',
-			title: '📻 Рация MESH_VOICE активна',
+			title: '📻 Рация MESH_VOICE active',
 			body: `Вы находитесь в канале: ${target}`,
 			android: {
 				channelId,
 				asForegroundService: true,
-				foregroundServiceTypes: Platform.OS === 'android' ? ['microphone' as any] : undefined,
+				// ❌ foregroundServiceTypes убран, так как он берется из app.json
 				color: AndroidColor.CYAN,
 				ongoing: true,
 				category: AndroidCategory.CALL,
@@ -215,67 +315,67 @@ export default function InternetChatRoom() {
 					id: 'default',
 					launchActivity: 'default',
 				},
+				actions: [
+					{
+						title: 'Завершить',
+						pressAction: { id: 'stop-call' },
+					},
+				],
 			}
 		});
 	};
+
 	const joinRoom = async (id?: string) => {
-		await AudioModule.setAudioModeAsync({
-			allowsRecording: true,
-			playsInSilentMode: true,
-			shouldRouteThroughEarpiece: false,
-		});
 		const target = id || roomID;
 		if (!target) return Alert.alert("Ошибка", "Введите название");
 		setRoomID(target);
 		saveRoomToRecent(target);
 		connectToSocket(target);
+
 		try {
 			const stream = await mediaDevices.getUserMedia({
 				audio: {
 					echoCancellation: false,
 					noiseSuppression: false,
 					autoGainControl: false,
+					sampleRate: 48000,
+					channelCount: 1,
 				} as any,
 				video: false
 			});
 			localStream.current = stream;
+
 			InCallManager.stop();
-			InCallManager.start({ media: 'audio', auto: true });
-			InCallManager.setKeepScreenOn(true);
+
+			await InCallManager.start({
+				media: 'audio',
+				auto: true,
+			});
+
 			InCallManager.setForceSpeakerphoneOn(true);
 			InCallManager.setSpeakerphoneOn(true);
 			InCallManager.setMicrophoneMute(false);
 			InCallManager.stopProximitySensor();
+
 			const settings = await notifee.requestPermission();
 			if (settings.authorizationStatus === 0) {
 				return Alert.alert("Ошибка", "Разрешите уведомления.");
 			}
+
 			await rebuildNotification(target);
+
 			if (Platform.OS === 'android') {
 				InCallManager.turnScreenOn();
 			}
-			if (activeInterval.current) clearInterval(activeInterval.current);
-			activeInterval.current = setInterval(() => {
-				if (socket.current?.connected) {
-					socket.current.emit('ping');
-				}
-				if (localStream.current) {
-					localStream.current.getAudioTracks().forEach((track: any) => {
-						const originalState = track.enabled;
-						track.enabled = !originalState;
-						track.enabled = originalState;
-					});
-				}
-				if (isSpeaker) {
-					InCallManager.setSpeakerphoneOn(true);
-				}
-			}, 3000);
+
 		} catch (e) {
-			console.error("Notifee Fatal Error:", e);
+			console.error("Join room error:", e);
+			Alert.alert("Ошибка", "Не удалось запустить аудио: " + (e as Error).message);
 		}
 		setInRoom(true);
 		updateUI();
 	};
+
 	const initiateCall = async (remoteId: string) => {
 		try {
 			const pc = getOrCreatePeer(remoteId);
@@ -284,6 +384,7 @@ export default function InternetChatRoom() {
 			socket.current.emit("signal", remoteId, { type: "offer", offer, name: userName });
 		} catch (e) { }
 	};
+
 	const getOrCreatePeer = (remoteId: string) => {
 		if (peers.current[remoteId]) return peers.current[remoteId];
 		let pc;
@@ -301,6 +402,7 @@ export default function InternetChatRoom() {
 		}, 2000);
 		return pc;
 	};
+
 	const sendChatMessage = () => {
 		if (!currentMsg.trim()) return;
 		const msg = { text: currentMsg, sender: userName, isMe: true };
@@ -308,6 +410,7 @@ export default function InternetChatRoom() {
 		socket.current.emit("chat", roomID, msg);
 		setCurrentMsg('');
 	};
+
 	const toggleMute = () => {
 		const nextMuteState = !isMuted;
 		setIsMuted(nextMuteState);
@@ -318,18 +421,20 @@ export default function InternetChatRoom() {
 			});
 		}
 	};
+
 	const toggleSpeaker = () => {
 		const newState = !isSpeaker;
 		InCallManager.setForceSpeakerphoneOn(newState);
 		InCallManager.setSpeakerphoneOn(newState);
 		setIsSpeaker(newState);
 	};
+
 	const switchMicrophone = async () => {
 		if (availableMics.length < 2) return;
 		const nextIdx = (currentMicIdx + 1) % availableMics.length;
 		try {
 			const newStream = await mediaDevices.getUserMedia({ audio: { deviceId: { exact: availableMics[nextIdx].deviceId } }, video: false });
-			const newTrack = newStream.getAudioTracks()[0];
+			const newTrack = newStream.getAudioTracks();
 			Object.values(peers.current).forEach((pc: any) => {
 				const sender = pc.getSenders().find((s: any) => s.track?.kind === 'audio');
 				if (sender) sender.replaceTrack(newTrack);
@@ -338,17 +443,25 @@ export default function InternetChatRoom() {
 			setCurrentMicIdx(nextIdx);
 		} catch (e) { }
 	};
+
 	const stopAll = async () => {
 		if (activeInterval.current) clearInterval(activeInterval.current);
 		if (socket.current) socket.current.disconnect();
 		Object.values(peers.current).forEach(p => p.close());
+
 		await notifee.stopForegroundService();
 		await notifee.cancelNotification('mesh-intercom-fgs');
+
 		peers.current = {};
 		remoteStreams.current = {};
 		setInRoom(false);
 		InCallManager.stop();
+		if (localStream.current) {
+			localStream.current.getTracks().forEach((t: any) => t.stop());
+			localStream.current = null;
+		}
 	};
+
 	return (
 		<View className="flex-1 bg-slate-950">
 			<Stack.Screen options={{ headerShown: false }} />
@@ -478,7 +591,7 @@ export default function InternetChatRoom() {
 				{localStream.current && <RTCView streamURL={localStream.current.toURL()} style={{ width: 1, height: 1 }} />}
 				{Object.keys(remoteStreams.current).map(id => {
 					const s = remoteStreams.current[id];
-					return (s && s[0] && typeof s[0].toURL === 'function') ? <RTCView key={id} streamURL={s[0].toURL()} style={{ width: 1, height: 1 }} /> : null;
+					return (s && typeof s.toURL === 'function') ? <RTCView key={id} streamURL={s.toURL()} style={{ width: 1, height: 1 }} /> : null;
 				})}
 			</View>
 		</View>
