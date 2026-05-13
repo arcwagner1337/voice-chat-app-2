@@ -22,6 +22,7 @@
     "@react-navigation/native": "^7.1.6",
     "buffer": "^6.0.3",
     "expo": "^54.0.34",
+    "expo-audio": "^55.0.14",
     "expo-av": "~16.0.8",
     "expo-build-properties": "~1.0.10",
     "expo-constants": "~18.0.9",

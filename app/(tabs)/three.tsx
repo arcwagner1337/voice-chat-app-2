@@ -12,15 +12,14 @@ import {
 	ScrollView,
 	Keyboard,
 	TouchableWithoutFeedback,
-	KeyboardAvoidingView,
-	NativeModules
+	KeyboardAvoidingView
 } from 'react-native';
 import InCallManager from 'react-native-incall-manager';
 import { mediaDevices, RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCView } from 'react-native-webrtc';
-import { useKeepAwake } from 'expo-keep-awake';
 import io from 'socket.io-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import notifee, { AndroidImportance, AndroidCategory } from '@notifee/react-native';
+import notifee, { AndroidImportance, AndroidCategory, AndroidColor, EventType } from '@notifee/react-native';
+import { AudioModule } from 'expo-audio';
 
 const SERVER_URL = "http://192.168.1.46:3000";
 const RECENT_ROOMS_KEY = "@recent_rooms_list";
@@ -28,13 +27,15 @@ const USER_NAME_KEY = "@user_custom_name";
 
 const configuration = {
 	iceServers: [
-		{ urls: 'stun:://google.com' },
-		{ urls: 'stun:://google.com' }
+		{ urls: 'stun:google.com' },
+		{ urls: 'stun:google.com' }
 	]
 };
+notifee.registerForegroundService(() => {
+	return new Promise(() => { });
+});
 
 export default function InternetChatRoom() {
-	useKeepAwake();
 	const activeInterval = useRef<any>(null);
 
 	const [userName, setUserName] = useState('');
@@ -57,39 +58,52 @@ export default function InternetChatRoom() {
 	const peerNames = useRef<{ [key: string]: string }>({});
 	const localStream = useRef<any>(null);
 	const flatListRef = useRef<any>(null);
-	const micInterval = useRef<any>(null); // ФИКС: Храним интервал
 
+	const inRoomRef = useRef(false);
+	const roomIDRef = useRef('');
+	useEffect(() => {
+		inRoomRef.current = inRoom;
+	}, [inRoom]);
+	useEffect(() => {
+		roomIDRef.current = roomID;
+	}, [roomID]);
 	useEffect(() => {
 		setupAll();
+		const unsubscribe = notifee.onForegroundEvent(async ({ type, detail }) => {
+			if (type === EventType.DISMISSED && detail.notification?.id === 'mesh-intercom-fgs') {
+				if (inRoomRef.current && roomIDRef.current) {
+					await rebuildNotification(roomIDRef.current);
+				}
+			}
+		});
 		return () => {
+			unsubscribe();
 			stopAll();
 		};
 	}, []);
-
 	useEffect(() => {
 		if (userName) AsyncStorage.setItem(USER_NAME_KEY, userName).catch(() => { });
 	}, [userName]);
-
 	const checkBattery = async () => {
-		const batteryOptimizationEnabled = await notifee.isBatteryOptimizationEnabled();
-		if (batteryOptimizationEnabled) {
-			Alert.alert(
-				'Внимание',
-				'Для работы рации в фоновом режиме нужно отключить оптимизацию батареи для этого приложения',
-				[
-					{ text: 'Открыть настройки', onPress: () => notifee.openBatteryOptimizationSettings() },
-					{ text: 'Отмена', style: 'cancel' },
-				]
-			);
+		if (Platform.OS === 'android') {
+			const batteryOptimizationEnabled = await notifee.isBatteryOptimizationEnabled();
+			if (batteryOptimizationEnabled) {
+				Alert.alert(
+					'Внимание',
+					'Для работы рации в фоновом режиме нужно отключить оптимизацию батареи для этого приложения',
+					[
+						{ text: 'Открыть настройки', onPress: () => notifee.openBatteryOptimizationSettings() },
+						{ text: 'Отмена', style: 'cancel' },
+					]
+				);
+			}
 		}
 	};
-
 	const setupAll = async () => {
-		await checkBattery(); // ФИКС: Проверка батареи при старте
+		await checkBattery();
 		await initApp();
 		await loadPersistentData();
 	};
-
 	const initApp = async () => {
 		if (Platform.OS === 'android') {
 			await PermissionsAndroid.requestMultiple([
@@ -98,12 +112,16 @@ export default function InternetChatRoom() {
 			]);
 		}
 		try {
+			await AudioModule.setAudioModeAsync({
+				allowsRecording: true,
+				playsInSilentMode: true,
+				shouldRouteThroughEarpiece: false,
+			});
 			const stream = await mediaDevices.getUserMedia({
 				audio: {
 					echoCancellation: true,
 					noiseSuppression: true,
 					autoGainControl: true,
-					// Добавляем эти параметры, они помогают системе понять тип трафика
 					googEchoCancellation: true,
 					googAutoGainControl: true,
 					googNoiseSuppression: true,
@@ -112,16 +130,13 @@ export default function InternetChatRoom() {
 				video: false
 			});
 			localStream.current = stream;
-			// ФИКС: Явно включаем трек
 			localStream.current.getAudioTracks().forEach((t: any) => t.enabled = true);
-
 			const devices: any = await mediaDevices.enumerateDevices();
 			setAvailableMics(devices.filter((d: any) => d.kind === 'audioinput'));
 			InCallManager.start({ media: 'audio' });
 			InCallManager.setForceSpeakerphoneOn(true);
 		} catch (e) { console.log("Mic init error", e); }
 	};
-
 	const loadPersistentData = async () => {
 		try {
 			const savedName = await AsyncStorage.getItem(USER_NAME_KEY);
@@ -130,24 +145,20 @@ export default function InternetChatRoom() {
 			if (savedRooms) setRecentRooms(JSON.parse(savedRooms));
 		} catch (e) { }
 	};
-
 	const saveRoomToRecent = async (id: string) => {
 		const updated = [id, ...recentRooms.filter(r => r !== id)].slice(0, 8);
 		setRecentRooms(updated);
 		await AsyncStorage.setItem(RECENT_ROOMS_KEY, JSON.stringify(updated));
 	};
-
 	const removeRoom = async (id: string) => {
 		const updated = recentRooms.filter(r => r !== id);
 		setRecentRooms(updated);
 		await AsyncStorage.setItem(RECENT_ROOMS_KEY, JSON.stringify(updated));
 	};
-
 	const updateUI = () => {
 		const list = Object.keys(remoteStreams.current).map(id => ({ id, name: peerNames.current[id] || 'Собеседник' }));
 		setParticipants([{ id: 'me', name: userName, isMe: true }, ...list]);
 	};
-
 	const connectToSocket = (targetRoom: string) => {
 		socket.current = io(SERVER_URL, { transports: ['websocket'], reconnection: true });
 		socket.current.on("chat-history", (h: any[]) => setChatMessages(h.map(m => ({ ...m, isMe: m.sender === userName }))));
@@ -181,85 +192,83 @@ export default function InternetChatRoom() {
 		});
 		socket.current.emit("join-room", targetRoom, userName);
 	};
-
+	const rebuildNotification = async (target: string) => {
+		const channelId = await notifee.createChannel({
+			id: 'mesh-voice-intercom',
+			name: 'Mesh Voice Intercom',
+			importance: AndroidImportance.HIGH,
+			sound: "default"
+		});
+		await notifee.displayNotification({
+			id: 'mesh-intercom-fgs',
+			title: '📻 Рация MESH_VOICE активна',
+			body: `Вы находитесь в канале: ${target}`,
+			android: {
+				channelId,
+				asForegroundService: true,
+				foregroundServiceTypes: Platform.OS === 'android' ? ['microphone' as any] : undefined,
+				color: AndroidColor.CYAN,
+				ongoing: true,
+				category: AndroidCategory.CALL,
+				importance: AndroidImportance.HIGH,
+				pressAction: {
+					id: 'default',
+					launchActivity: 'default',
+				},
+			}
+		});
+	};
 	const joinRoom = async (id?: string) => {
+		await AudioModule.setAudioModeAsync({
+			allowsRecording: true,
+			playsInSilentMode: true,
+			shouldRouteThroughEarpiece: false,
+		});
 		const target = id || roomID;
 		if (!target) return Alert.alert("Ошибка", "Введите название");
-
 		setRoomID(target);
 		saveRoomToRecent(target);
 		connectToSocket(target);
-
 		try {
 			const stream = await mediaDevices.getUserMedia({
 				audio: {
-					echoCancellation: false, // Отключаем, чтобы не гасил фоновый шум
+					echoCancellation: false,
 					noiseSuppression: false,
 					autoGainControl: false,
-					// Эти параметры заставляют поток идти постоянно
 				} as any,
 				video: false
 			});
 			localStream.current = stream;
 			InCallManager.stop();
-			InCallManager.start({ media: 'audio', ringback: '' });
+			InCallManager.start({ media: 'audio', auto: true });
 			InCallManager.setKeepScreenOn(true);
 			InCallManager.setForceSpeakerphoneOn(true);
 			InCallManager.setSpeakerphoneOn(true);
 			InCallManager.setMicrophoneMute(false);
 			InCallManager.stopProximitySensor();
-
 			const settings = await notifee.requestPermission();
 			if (settings.authorizationStatus === 0) {
 				return Alert.alert("Ошибка", "Разрешите уведомления.");
 			}
-			const channelId = await notifee.createChannel({
-				id: 'incoming-calls',
-				name: 'Голосовой чат',
-				importance: AndroidImportance.HIGH,
-				sound: 'default',
-			});
-			await notifee.displayNotification({
-				title: 'Рация активна',
-				body: `Вы в комнате: ${target}`,
-				android: {
-					channelId: 'incoming-calls',
-					asForegroundService: true, // Этого достаточно, если в манифесте есть патч
-					category: AndroidCategory.CALL,
-					importance: AndroidImportance.HIGH,
-					ongoing: true,
-					pressAction: { id: 'default' },
-				},
-			});
+			await rebuildNotification(target);
+			if (Platform.OS === 'android') {
+				InCallManager.turnScreenOn();
+			}
 			if (activeInterval.current) clearInterval(activeInterval.current);
-
-			// Создаем ОДИН "двигатель" для всего приложения
 			activeInterval.current = setInterval(() => {
-				// 1. Пинг сокета
 				if (socket.current?.connected) {
 					socket.current.emit('ping');
 				}
-
-				// 2. Оживление микрофона (фикс для сна Android)
 				if (localStream.current) {
 					localStream.current.getAudioTracks().forEach((track: any) => {
-						// Переключаем, чтобы заставить Android отдавать данные
-						track.enabled = false;
-						track.enabled = true;
+						const originalState = track.enabled;
+						track.enabled = !originalState;
+						track.enabled = originalState;
 					});
 				}
-
-				// 3. Поддержание громкой связи
 				if (isSpeaker) {
 					InCallManager.setSpeakerphoneOn(true);
 				}
-
-				// 4. Пинг WebRTC через DataChannel (перебираем всех пиров)
-				Object.values(peers.current).forEach((pc: any) => {
-					// Если ты создавал dc в getOrCreatePeer, можно слать тут
-					// Но даже первых трех пунктов хватит, чтобы система не спала
-				});
-
 			}, 3000);
 		} catch (e) {
 			console.error("Notifee Fatal Error:", e);
@@ -267,8 +276,6 @@ export default function InternetChatRoom() {
 		setInRoom(true);
 		updateUI();
 	};
-
-
 	const initiateCall = async (remoteId: string) => {
 		try {
 			const pc = getOrCreatePeer(remoteId);
@@ -277,7 +284,6 @@ export default function InternetChatRoom() {
 			socket.current.emit("signal", remoteId, { type: "offer", offer, name: userName });
 		} catch (e) { }
 	};
-
 	const getOrCreatePeer = (remoteId: string) => {
 		if (peers.current[remoteId]) return peers.current[remoteId];
 		let pc;
@@ -293,11 +299,8 @@ export default function InternetChatRoom() {
 				dc.send("keep-alive");
 			}
 		}, 2000);
-
 		return pc;
-
 	};
-
 	const sendChatMessage = () => {
 		if (!currentMsg.trim()) return;
 		const msg = { text: currentMsg, sender: userName, isMe: true };
@@ -305,20 +308,22 @@ export default function InternetChatRoom() {
 		socket.current.emit("chat", roomID, msg);
 		setCurrentMsg('');
 	};
-
 	const toggleMute = () => {
-		const newState = !isMuted;
-		setIsMuted(newState);
-		if (localStream.current) localStream.current.getAudioTracks().forEach((t: any) => t.enabled = !newState);
+		const nextMuteState = !isMuted;
+		setIsMuted(nextMuteState);
+		InCallManager.setMicrophoneMute(nextMuteState);
+		if (localStream.current) {
+			localStream.current.getAudioTracks().forEach((t: any) => {
+				t.enabled = !nextMuteState;
+			});
+		}
 	};
-
 	const toggleSpeaker = () => {
 		const newState = !isSpeaker;
 		InCallManager.setForceSpeakerphoneOn(newState);
-		InCallManager.setSpeakerphoneOn(newState); // ФИКС
+		InCallManager.setSpeakerphoneOn(newState);
 		setIsSpeaker(newState);
 	};
-
 	const switchMicrophone = async () => {
 		if (availableMics.length < 2) return;
 		const nextIdx = (currentMicIdx + 1) % availableMics.length;
@@ -329,25 +334,21 @@ export default function InternetChatRoom() {
 				const sender = pc.getSenders().find((s: any) => s.track?.kind === 'audio');
 				if (sender) sender.replaceTrack(newTrack);
 			});
-			localStream.current = newStream; // ФИКС: Обновляем локальную ссылку
+			localStream.current = newStream;
 			setCurrentMicIdx(nextIdx);
 		} catch (e) { }
 	};
-
 	const stopAll = async () => {
-		if (micInterval.current) clearInterval(micInterval.current); // ФИКС: Чистим интервал
+		if (activeInterval.current) clearInterval(activeInterval.current);
 		if (socket.current) socket.current.disconnect();
 		Object.values(peers.current).forEach(p => p.close());
-
-		await notifee.stopForegroundService(); // ФИКС: Грохаем сервис
-		await notifee.cancelAllNotifications();
-
+		await notifee.stopForegroundService();
+		await notifee.cancelNotification('mesh-intercom-fgs');
 		peers.current = {};
 		remoteStreams.current = {};
 		setInRoom(false);
 		InCallManager.stop();
 	};
-
 	return (
 		<View className="flex-1 bg-slate-950">
 			<Stack.Screen options={{ headerShown: false }} />
