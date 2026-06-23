@@ -83,7 +83,7 @@ jobs:
           find node_modules -name "build.gradle" -exec sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 35/g' {} +
           find node_modules -name "build.gradle" -exec sed -i 's/buildToolsVersion "[0-9.]*"/buildToolsVersion "35.0.0"/g' {} +
       - name: 🐘 Cache Gradle
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches

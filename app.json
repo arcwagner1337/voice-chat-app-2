@@ -30,7 +30,8 @@
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Доступ к микрофону нужен для голосовой связи.",
         "NSLocalNetworkUsageDescription": "Нужен доступ к локальной сети для работы чата без интернета."
-      }
+      },
+      "bitcode": false
     },
     "android": {
       "package": "com.anonymous.voicechatapp",
@@ -60,7 +61,15 @@
         "FOREGROUND_SERVICE_CONNECTED_DEVICE",
         "FOREGROUND_SERVICE_SPECIAL_USE",
         "FOREGROUND_SERVICE_SYSTEM_EXEMPTED",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
       ]
     },
     "plugins": [
@@ -104,9 +113,11 @@
       "tsconfigPaths": true
     },
     "extra": {
+      "router": {},
       "eas": {
-        "projectId": "fbb57b22-f495-4cee-af03-200087946956"
+        "projectId": "7d330958-fd82-44c7-85d9-3382d80f36df"
       }
-    }
+    },
+    "owner": "arcwagner"
   }
 }
