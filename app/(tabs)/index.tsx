@@ -109,7 +109,7 @@ export default function ProjectInfo() {
         </View>
 
         <View className="gap-y-8">
-          <Text className="text-cyan-500 font-bold tracking-[4px] text-xs uppercase">// Technical_Specs</Text>
+          <Text className="text-cyan-500 font-bold tracking-[4px] text-xs uppercase">// asdqwe Technical_Specs</Text>
           <TechBlock title="L0_MDNS_DISCOVERY" desc="Автономный поиск узлов в локальной сети через Zeroconf (mDNS)." />
           <TechBlock title="L1_RAW_UDP_STREAM" desc="Прямая передача PCM-потока (16-bit, 44.1kHz) с минимальным оверхедом." />
           <TechBlock title="L2_WEBRTC_P2P" desc="Защищенный полнодуплексный канал связи с шумоподавлением." />

@@ -6,13 +6,17 @@ import InCallManager from 'react-native-incall-manager';
 import { mediaDevices, RTCPeerConnection, RTCSessionDescription, RTCIceCandidate, RTCView } from 'react-native-webrtc';
 import TcpSocket from 'react-native-tcp-socket';
 import { useKeepAwake } from 'expo-keep-awake';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import notifee, { AndroidForegroundServiceType } from '@notifee/react-native';
+import { AppState, AppStateStatus } from 'react-native';
 
 const zeroconf = new Zeroconf();
 let isSending = false;
 let signalQueue: { ip: string; data: any; port: number }[] = [];
 
 export default function MeshChatRoom() {
-  useKeepAwake();
+  // useKeepAwake();
+
 
   // Профиль
   const [userName, setUserName] = useState(`Пользователь-${Math.floor(Math.random() * 99)}`);
@@ -48,13 +52,134 @@ export default function MeshChatRoom() {
   const [, setTick] = useState(0);
   const forceUpdate = () => setTick(t => t + 1);
 
+  const inRoomRef = useRef(inRoom);
   useEffect(() => {
+    inRoomRef.current = inRoom;
+  }, [inRoom]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const manageKeepAwake = async () => {
+      try {
+        if (inRoom) {
+          await activateKeepAwakeAsync();
+        } else {
+          // Убираем Async отсюда
+          deactivateKeepAwake();
+        }
+      } catch (e) {
+        console.log('KeepAwake проигнорирован:', e);
+      }
+    };
+
+    manageKeepAwake();
+
+    return () => {
+      isMounted = false;
+      // И отсюда тоже убираем Async
+      try { deactivateKeepAwake(); } catch (e) { }
+    };
+  }, [inRoom]);
+
+
+
+  const myIpRef = useRef(myIp);
+  useEffect(() => { myIpRef.current = myIp; }, [myIp]);
+
+  useEffect(() => {
+    // 1. Инициализируем приложение (запрос разрешений и получение стрима)
     initApp();
+
+    // 2. ВЕШАЕМ СЛУШАТЕЛЯ ZEROCONF СТРОГО ОДИН РАЗ ТУТ
+    zeroconf.on('resolved', (s) => {
+      const ip = s.addresses?.find(a => a.includes('.') && !a.startsWith('169'));
+      if (s.name === myServiceName) {
+        if (ip) setMyIp(ip);
+      } else if (ip && ip !== myIpRef.current && s.txt?.isRoom === 'true') {
+        setAvailableRooms(prev => {
+          const otherRooms = prev.filter(r => r.ip !== ip);
+          return [...otherRooms, { name: s.txt?.roomName || s.name, ip, port: s.port, lastSeen: Date.now() }];
+        });
+      }
+    });
+
+    // 3. Обработчик AppState с явным указанием типа, чтобы TS не ругался (фикс image_7ae5ec.png)
+    const handleAppStateChange = (nextAppState: import('react-native').AppStateStatus) => {
+      if (inRoomRef.current && nextAppState === 'background') {
+        if (Platform.OS === 'android') {
+          InCallManager.start({ media: 'video' });
+          InCallManager.setSpeakerphoneOn(true);
+        }
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    // 4. Таймер очистки комнат
     const timer = setInterval(() => {
       setAvailableRooms(prev => prev.filter(r => Date.now() - r.lastSeen < 15000));
     }, 5000);
-    return () => { clearInterval(timer); stopAll(); };
+
+    // ХУК ОЧИСТКИ ПРИ РАЗМОНТИРОВАНИИ ЭКРАНА
+    return () => {
+      console.log('Удаляем все слушатели и останавливаем службы...');
+      if (subscription?.remove) subscription.remove();
+      clearInterval(timer);
+
+      try {
+        if (zeroconf) {
+          // Намертво сносим единственный обработчик, чтобы не копить их при перезаходах
+          zeroconf.removeAllListeners('resolved');
+          if (myServiceName) {
+            zeroconf.unpublishService(myServiceName);
+          }
+          zeroconf.stop();
+        }
+      } catch (e) {
+        console.log('Ошибка очистки Zeroconf:', e);
+      }
+
+      try { InCallManager.stop(); } catch (e) { }
+    };
   }, []);
+
+
+  // useEffect(() => {
+  //   initApp();
+
+  //   const handleAppStateChange = (nextAppState: AppStateStatus) => {
+  //     if (inRoom && nextAppState === 'background') {
+  //       // Когда апка уходит в фон, принудительно подтверждаем аудио-режим звонка,
+  //       // чтобы Android не успел отобрать у WebRTC микрофон
+  //       if (Platform.OS === 'android') {
+  //         InCallManager.start({ media: 'video' });
+  //         InCallManager.setSpeakerphoneOn(true);
+  //       }
+  //     }
+  //   };
+
+  //   const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+  //   const timer = setInterval(() => {
+  //     setAvailableRooms(prev => prev.filter(r => Date.now() - r.lastSeen < 15000));
+  //   }, 5000);
+
+  //   return () => {
+  //     subscription.remove();
+  //     clearInterval(timer);
+  //     stopAll();
+  //   };
+  // }, [inRoom]);
+
+
+  // useEffect(() => {
+  //   initApp();
+  //   const timer = setInterval(() => {
+  //     setAvailableRooms(prev => prev.filter(r => Date.now() - r.lastSeen < 15000));
+  //   }, 5000);
+  //   return () => { clearInterval(timer); stopAll(); };
+  // }, []);
 
   const initApp = async () => {
     if (Platform.OS === 'android') {
@@ -68,31 +193,61 @@ export default function MeshChatRoom() {
     setupDiscovery();
   };
 
+
   const setupDiscovery = () => {
     zeroconf.stop();
-    zeroconf.on('resolved', (s) => {
-      const ip = s.addresses?.find(a => a.includes('.') && !a.startsWith('169'));
-      if (s.name === myServiceName) {
-        if (ip) setMyIp(ip);
-      } else if (ip && ip !== myIp && s.txt?.isRoom === 'true') {
-        setAvailableRooms(prev => {
-          const otherRooms = prev.filter(r => r.ip !== ip);
-          return [...otherRooms, { name: s.txt?.roomName || s.name, ip, port: s.port, lastSeen: Date.now() }];
-        });
-      }
-    });
+    // УБРАЛИ ОТСЮДА zeroconf.on('resolved') — он теперь живёт в useEffect!
+
     zeroconf.publishService('voicechat', 'tcp', 'local.', myServiceName, 11111);
     setTimeout(() => { if (!isHost) zeroconf.unpublishService(myServiceName); }, 3000);
     zeroconf.scan('voicechat', 'tcp', 'local.');
   };
 
+  // const setupDiscovery = () => {
+  //   zeroconf.stop();
+  //   zeroconf.on('resolved', (s) => {
+  //     const ip = s.addresses?.find(a => a.includes('.') && !a.startsWith('169'));
+  //     if (s.name === myServiceName) {
+  //       if (ip) setMyIp(ip);
+  //     } else if (ip && ip !== myIp && s.txt?.isRoom === 'true') {
+  //       setAvailableRooms(prev => {
+  //         const otherRooms = prev.filter(r => r.ip !== ip);
+  //         return [...otherRooms, { name: s.txt?.roomName || s.name, ip, port: s.port, lastSeen: Date.now() }];
+  //       });
+  //     }
+  //   });
+  //   zeroconf.publishService('voicechat', 'tcp', 'local.', myServiceName, 11111);
+  //   setTimeout(() => { if (!isHost) zeroconf.unpublishService(myServiceName); }, 3000);
+  //   zeroconf.scan('voicechat', 'tcp', 'local.');
+  // };
+
   const createRoom = async () => {
     if (!myIp) return Alert.alert("Ошибка", "Дождитесь определения IP");
     const port = parseInt(roomPort);
     activePort.current = port;
+
+    // await startAudioForegroundService();
+
     setupTcpServer(port);
-    InCallManager.start({ media: 'audio' });
-    InCallManager.setForceSpeakerphoneOn(true);
+    // InCallManager.start({ media: 'audio' });
+    // InCallManager.setForceSpeakerphoneOn(true);
+
+    InCallManager.start({ media: 'video' }); // Используем 'video', чтобы принудительно выставить тип VOIP в WebRTC
+
+    if (Platform.OS === 'android') {
+      InCallManager.setForceSpeakerphoneOn(true);
+      InCallManager.setSpeakerphoneOn(true);
+
+      // Явно запрашиваем аудиофокус для звонков. Без этого Android 15 считает,
+      // что наше приложение — это просто плеер или игра, и глушит микрофон в фоне.
+      try {
+        // В некоторых версиях библиотеки этот метод принудительно удерживает фокус связи
+        InCallManager.requestAudioFocus();
+      } catch (e) {
+        console.log('InCallManager.requestAudioFocus не поддерживается, пропускаем');
+      }
+    }
+
     zeroconf.publishService('voicechat', 'tcp', 'local.', myServiceName, port, { roomName, isRoom: 'true' });
     setIsHost(true);
     setInRoom(true);
@@ -101,9 +256,30 @@ export default function MeshChatRoom() {
   const joinRoom = async (room: any) => {
     if (parseInt(inputPass) !== room.port) return Alert.alert("Ошибка", "Неверный пароль");
     activePort.current = room.port;
+
+    await startAudioForegroundService();
+
     setupTcpServer(room.port);
-    InCallManager.start({ media: 'audio' });
-    InCallManager.setForceSpeakerphoneOn(true);
+    // InCallManager.start({ media: 'audio' });
+    // InCallManager.setForceSpeakerphoneOn(true);
+
+    InCallManager.start({ media: 'video' }); // Используем 'video', чтобы принудительно выставить тип VOIP в WebRTC
+
+    if (Platform.OS === 'android') {
+      InCallManager.setForceSpeakerphoneOn(true);
+      InCallManager.setSpeakerphoneOn(true);
+
+      // Явно запрашиваем аудиофокус для звонков. Без этого Android 15 считает,
+      // что наше приложение — это просто плеер или игра, и глушит микрофон в фоне.
+      try {
+        // В некоторых версиях библиотеки этот метод принудительно удерживает фокус связи
+        InCallManager.requestAudioFocus();
+      } catch (e) {
+        console.log('InCallManager.requestAudioFocus не поддерживается, пропускаем');
+      }
+    }
+
+
     const pc = getOrCreatePeer(room.ip);
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -212,6 +388,9 @@ export default function MeshChatRoom() {
   const stopAll = () => {
     const exitSignal = isHost ? 'room_closed' : 'bye';
     Object.keys(peers.current).forEach(ip => sendSignaling(ip, { type: exitSignal }, activePort.current));
+
+    stopAudioForegroundService();
+
     setTimeout(() => {
       Object.values(peers.current).forEach(p => p.close());
       peers.current = {}; remoteStreams.current = {}; peerNames.current = {};
@@ -221,6 +400,40 @@ export default function MeshChatRoom() {
       if (server.current) server.current.close();
       setupDiscovery();
     }, 400);
+  };
+
+
+  const startAudioForegroundService = async () => {
+    try {
+      // Создаем канал уведомлений
+      const channelId = await notifee.createChannel({
+        id: 'voice-chat-service',
+        name: 'Голосовая связь',
+        importance: 4, // High importance
+      });
+
+      // Запускаем переднеплановый сервис
+      await notifee.displayNotification({
+        id: 'voice-active-notification',
+        title: `Вы в комнате: ${roomName}`,
+        body: 'Микрофон работает в фоновом режиме.',
+        android: {
+          channelId,
+          asForegroundService: true, // Обязательно для удержания фона
+          ongoing: true, // Запрещает юзеру просто смахнуть уведомление
+          foregroundServiceTypes: [128 as any], // Android 14/15 фикс
+        },
+      });
+      console.log('Foreground Service успешно запущен');
+    } catch (err) {
+      console.error('Не удалось запустить фоновый сервис:', err);
+    }
+  };
+
+  const stopAudioForegroundService = async () => {
+    try {
+      await notifee.stopForegroundService();
+    } catch (e) { }
   };
 
   // Формируем список для отображения (ТЫ + ОСТАЛЬНЫЕ)
@@ -395,3 +608,10 @@ export default function MeshChatRoom() {
     </View>
   );
 }
+
+notifee.registerForegroundService((notification) => {
+  return new Promise(() => {
+    // Бесконечный промис держит сервис живым, пока мы не вызовем stopForegroundService
+    console.log('Нативный Foreground Service микрофона запущен в фоне!');
+  });
+});
